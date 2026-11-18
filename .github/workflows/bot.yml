@@ -1,0 +1,51 @@
+name: Run DEV Discord Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Jalan otomatis tiap 5 jam 45 menit (sebelum batas 6 jam GitHub Actions)
+    - cron: '0 */5 * * *'
+
+concurrency:
+  group: dev-discord-bot-runner
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore AI memory cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dev-ai-memory.json
+          key: ai-memory-${{ github.run_id }}
+          restore-keys: |
+            ai-memory-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot (5h 40m session)
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+        run: timeout 20400 python3 bot.py || true
+
+      - name: Save AI memory cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: dev-ai-memory.json
+          key: ai-memory-${{ github.run_id }}
