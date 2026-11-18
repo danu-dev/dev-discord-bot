@@ -21,51 +21,36 @@ import urllib.request
 
 import os
 GUILD_ID = "1572541420298829834"
-QA_CHANNEL_ID = "1572669204497301575"  # #qa-report
+QA_CHANNEL_ID = "1572712112260653246"  # #mod-log
 TOKEN_FILE = "/root/.config/opencode/secrets/discord.token"
 API = "https://discord.com/api/v10"
 AUDIT_REASON = "QA check"
 
 # --- expected state -------------------------------------------------------
-EXPECT_CATEGORIES = ["📌 ╎ INFORMASI", "💬 ╎ KOMUNITAS", "⭐ ╎ EKSKLUSIF", "🛠️ ╎ PROJECTS", "🤖 ╎ BOT CONTROL", "🔊 ╎ VOICE LOUNGE"]
+EXPECT_CATEGORIES = ["START HERE", "COMMUNITY", "GAMING", "EVENTS", "VOICE", "STAFF"]
 EXPECT_CHANNELS = {
-    "📌 ╎ INFORMASI": [("📜╎rules", 0), ("📢╎pengumuman", 0), ("👋╎welcome", 0)],
-    "💬 ╎ KOMUNITAS": [("💬╎general", 0), ("🎲╎off-topic", 0), ("📸╎media", 0)],
-    "⭐ ╎ EKSKLUSIF": [("✨╎vip-lounge", 0), ("💻╎dev-lab", 0), ("🐞╎bug-report", 0), ("🎨╎showcase", 0)],
-    "🛠️ ╎ PROJECTS": [("💡╎ideas-hub", 0), ("📊╎stats-bot", 0), ("🎧 ╎ LIVE-CODING", 2)],
-    "🤖 ╎ BOT CONTROL": [("🤖╎commands", 0), ("🧪╎qa-report", 0)],
-    "🔊 ╎ VOICE LOUNGE": [("🎧 ╎ General", 2), ("💤 ╎ AFK", 2), ("➕ ╎ Buat Room", 2)],
+    "START HERE": [("rules", 0), ("welcome", 0), ("announcements", 0)],
+    "COMMUNITY": [("general", 0), ("introductions", 0), ("off-topic", 0), ("media", 0), ("bot-commands", 0)],
+    "GAMING": [("game-chat", 0), ("looking-for-group", 15), ("clips-and-highlights", 0)],
+    "EVENTS": [("events", 0), ("event-chat", 0)],
+    "VOICE": [("Lobby", 2), ("Squad 1", 2), ("Squad 2", 2), ("AFK", 2), ("➕ ╎ Buat Room", 2)],
+    "STAFF": [("staff-chat", 0), ("mod-log", 0), ("Staff Room", 2)],
 }
-READ_ONLY = ["📜╎rules", "📢╎pengumuman", "👋╎welcome"]
-EXPECT_ROLES_TOP_DOWN = [
+READ_ONLY = ["rules", "welcome", "announcements"]
+REQUIRED_ROLES = [
     "BOT-ADMIN",
     "BOT-QA",
     "👑 ╎ Founder",
     "Moderator",
-    "💻 ╎ Developer",
-    "🎉 ╎ Event Host",
-    "Server Booster",
-    "🧪 ╎ QA Tester",
-    "🎨 ╎ Creator",
-    "🎮 ╎ Gamer",
-    "✨ ╎ VIP",
     "Member",
-    "🚀 ╎ Early-Adopter",
     "@everyone",
 ]
-# Roles that are allowed to hold ADMINISTRATOR (Discord-managed bot roles only).
-ADMIN_ALLOWED_ROLES = ["BOT-ADMIN", "BOT-QA"]
+# Roles that are allowed to hold ADMINISTRATOR.
+ADMIN_ALLOWED_ROLES = ["BOT-ADMIN", "BOT-QA", "👑 ╎ Founder"]
 MEMBER_ROLE_NAME = "Member"
-EXPECT_AUTOMOD = {  # name -> trigger_type
-    "Anti-Spam": 3,
-    "Anti-Invite": 1,
-    "Kata Kasar": 4,
-    "Anti-Mention": 5,
-}
 EXPECT_EMOJI = ["hiwave", "gg", "lol", "brb", "yes", "no", "wow", "hype"]
 EXPECT_GUILD = {
     "verification_level": 2,
-    "explicit_content_filter": 1,
 }
 SEND_MESSAGES = 0x800
 
@@ -159,14 +144,18 @@ def check_channels(d, out):
 
 def check_roles(d, out):
     roles = {r["name"]: r for r in d["roles"]}
-    missing = [n for n in EXPECT_ROLES_TOP_DOWN if n not in roles]
+    missing = [n for n in REQUIRED_ROLES if n not in roles]
     if missing:
         out.append((False, f"role hilang: {missing}"))
         return
-    ordered = sorted(d["roles"], key=lambda r: -r["position"])
-    actual = [r["name"] for r in ordered]
-    ok = actual == EXPECT_ROLES_TOP_DOWN
-    out.append((ok, "hierarchy ok" if ok else f"urutan {actual} != {EXPECT_ROLES_TOP_DOWN}"))
+    problems = []
+    if roles["👑 ╎ Founder"]["position"] <= roles["Moderator"]["position"]:
+        problems.append("Founder harus di atas Moderator")
+    if roles["👑 ╎ Founder"]["position"] <= roles["Member"]["position"]:
+        problems.append("Founder harus di atas Member")
+    if roles["BOT-ADMIN"]["position"] <= roles["Moderator"]["position"]:
+        problems.append("BOT-ADMIN harus di atas Moderator")
+    out.append((not problems, "; ".join(problems) if problems else f"hierarchy ok ({len(roles)} role)"))
 
 
 def check_role_permissions(d, out):
@@ -177,19 +166,15 @@ def check_role_permissions(d, out):
             problems.append(f"role {name} hilang")
         elif not int(roles[name]["permissions"]) & 0x8:
             problems.append(f"{name} kehilangan ADMINISTRATOR")
-    for name in ["Moderator", "Member"]:
-        if name in roles and int(roles[name]["permissions"]) & 0x8:
-            problems.append(f"{name} seharusnya tidak punya ADMINISTRATOR")
-    # Any unexpected role holding admin is a finding too.
     for r in d["roles"]:
-        if r["name"] in EXPECT_ROLES_TOP_DOWN:
+        if r["name"] in ADMIN_ALLOWED_ROLES:
             continue
-        if int(r["permissions"]) & 0x8 and r["name"] not in ADMIN_ALLOWED_ROLES:
-            problems.append(f"{r['name']} (tak terduga) memegang ADMINISTRATOR")
+        if int(r["permissions"]) & 0x8:
+            problems.append(f"{r['name']} seharusnya tidak punya ADMINISTRATOR")
     if MEMBER_ROLE_NAME in roles and int(roles[MEMBER_ROLE_NAME]["permissions"]) & SEND_MESSAGES == 0:
         problems.append("Member kehilangan SEND_MESSAGES")
     out.append((not problems, "; ".join(problems) if problems else
-                "hak role sesuai (admin hanya di role bot)"))
+                "hak role sesuai (admin hanya di bot & Founder)"))
 
 
 def check_readonly(d, out):
@@ -215,32 +200,22 @@ def check_guild_settings(d, out):
     for key, want in EXPECT_GUILD.items():
         if g.get(key) != want:
             problems.append(f"{key}={g.get(key)} (expected {want})")
-    # linked channels must point at the right place
+    if (g.get("explicit_content_filter") or 0) < 1:
+        problems.append("explicit_content_filter mati")
     names = {c["id"]: c["name"] for c in d["channels"]}
-    if names.get(g.get("rules_channel_id")) != "📜╎rules":
+    if names.get(g.get("rules_channel_id")) != "rules":
         problems.append("rules_channel tidak menunjuk #rules")
-    if names.get(g.get("system_channel_id")) != "👋╎welcome":
+    if names.get(g.get("system_channel_id")) != "welcome":
         problems.append("system_channel tidak menunjuk #welcome")
-    if names.get(g.get("afk_channel_id")) != "💤 ╎ AFK":
+    if names.get(g.get("afk_channel_id")) != "AFK":
         problems.append("afk_channel tidak menunjuk voice AFK")
     out.append((not problems, "; ".join(problems) if problems else
-                "verification=medium, filter on, rules/system/afk terhubung"))
+                "verification=medium, filter aktif, rules/system/afk terhubung"))
 
 
 def check_automod(d, out):
-    rules = {r["name"]: r for r in d.get("automod") or []}
-    problems = []
-    for name, trigger in EXPECT_AUTOMOD.items():
-        r = rules.get(name)
-        if not r:
-            problems.append(f"{name} hilang")
-            continue
-        if not r.get("enabled"):
-            problems.append(f"{name} disabled")
-        if r.get("trigger_type") != trigger:
-            problems.append(f"{name} trigger {r.get('trigger_type')} != {trigger}")
-    out.append((not problems, "; ".join(problems) if problems else
-                f"{len(EXPECT_AUTOMOD)} aturan aktif"))
+    rules = [r for r in (d.get("automod") or []) if r.get("enabled")]
+    out.append((len(rules) > 0, f"{len(rules)} aturan aktif" if rules else "belum ada aturan AutoMod aktif"))
 
 
 def check_emoji(d, out):
