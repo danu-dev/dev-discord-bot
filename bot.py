@@ -771,7 +771,7 @@ def _make_audio_source(url, headers=None):
         if hdr:
             before.append(f'-headers "{hdr}"')
     raw = discord.FFmpegPCMAudio(url, before_options=" ".join(before) or None, options="-vn")
-    return discord.PCMVolumeTransformer(raw, volume=0.6)
+    return discord.PCMVolumeTransformer(raw, volume=1.0)
 
 
 def _play_next_in_queue(guild, text_channel=None):
