@@ -1,6 +1,8 @@
 name: Run DEV Discord Bot
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     # Jalan otomatis tiap 5 jam 45 menit (sebelum batas 6 jam GitHub Actions)
