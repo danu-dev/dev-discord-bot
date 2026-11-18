@@ -106,7 +106,7 @@ Aksi (pakai nama persis dari state server; maks 15):
 - send_embed: channel, title, description, color(#RRGGBB)
 - purge_messages: channel, limit(int)
 
-Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, !lofi [play|next|stop], auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room".
+Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, !play <judul>, !skip, !queue, !stop, !lofi [next|stop], auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room".
 Aturan ketat:
 1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru (mis. sistem /suggestion, ticket, leveling), jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
 2. Jika hanya ngobrol/tanya/komplain, jawab ringkas & jelas di "reply" dengan actions [].
@@ -627,7 +627,8 @@ HELP = discord.Embed(
 HELP.add_field(name="!qa", value="Cek struktur server", inline=True)
 HELP.add_field(name="!qa test", value="Tes langsung", inline=True)
 HELP.add_field(name="!reset", value="Hapus ingatan chat AI", inline=True)
-HELP.add_field(name="!lofi", value="Putar radio lofi 24/7 di voice (`!lofi next` / `!lofi stop`)", inline=False)
+HELP.add_field(name="!lofi", value="Radio lofi 24/7 (`!lofi next` / `!lofi stop`)", inline=True)
+HELP.add_field(name="!play <judul>", value="Cari & putar lagu sesuai judul (`!skip`, `!queue`, `!stop`)", inline=True)
 HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
 
 
@@ -704,7 +705,7 @@ async def on_voice_state_update(member, before, after):
             pass
 
 
-# --- Lofi Music Radio -----------------------------------------------------
+# --- Lofi Radio & Search-by-Title Music Player -----------------------------
 LOFI_STATIONS = [
     ("lofi", "☕ Lofi Beats Radio", "https://play.streamafrica.net/lofiradio"),
     ("chillsynth", "🌃 Nightride Chillsynth", "https://stream.nightride.fm/chillsynth.mp3"),
@@ -712,13 +713,85 @@ LOFI_STATIONS = [
     ("lush", "🌙 SomaFM Lush", "https://ice2.somafm.com/lush-128-mp3"),
 ]
 LOFI_STATE = {"idx": 0}
+MUSIC_QUEUE = []  # list of {"title": str, "url": str, "webpage": str, "requester": str}
+NOW_PLAYING = {"track": None}
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 
 
+def _search_track(query):
+    import yt_dlp
+    opts = {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "ytsearch1",
+    }
+    candidates = [query] if query.startswith(("http://", "https://")) else [f"ytsearch1:{query}", f"scsearch1:{query}"]
+    last_err = None
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        for target in candidates:
+            try:
+                info = ydl.extract_info(target, download=False)
+                if "entries" in info:
+                    entries = [e for e in (info.get("entries") or []) if e]
+                    if not entries:
+                        continue
+                    info = entries[0]
+                stream_url = info.get("url")
+                if not stream_url:
+                    continue
+                return {
+                    "title": info.get("title") or query,
+                    "url": stream_url,
+                    "webpage": info.get("webpage_url") or "",
+                }
+            except Exception as exc:
+                last_err = exc
+    raise RuntimeError(f"Lagu tidak ditemukan ({last_err or 'kosong'})")
+
+
+def _play_next_in_queue(guild, text_channel=None):
+    vc = guild.voice_client
+    if not vc or not vc.is_connected():
+        MUSIC_QUEUE.clear()
+        NOW_PLAYING["track"] = None
+        return
+    if not MUSIC_QUEUE:
+        NOW_PLAYING["track"] = None
+        return
+    track = MUSIC_QUEUE.pop(0)
+    NOW_PLAYING["track"] = track
+    source = discord.FFmpegPCMAudio(track["url"], before_options=FFMPEG_BEFORE, options="-vn")
+
+    def _after(err):
+        if err:
+            log("music stream err:", err)
+        fut = asyncio.run_coroutine_threadsafe(_on_track_end(guild, text_channel), client.loop)
+        try:
+            fut.result()
+        except Exception:
+            pass
+
+    vc.play(source, after=_after)
+
+
+async def _on_track_end(guild, text_channel):
+    if MUSIC_QUEUE:
+        _play_next_in_queue(guild, text_channel)
+        t = NOW_PLAYING["track"]
+        if text_channel and t:
+            await text_channel.send(embed=_music_embed(t, guild.voice_client.channel.name), view=LofiView())
+    else:
+        NOW_PLAYING["track"] = None
+
+
 def _play_station(vc, idx):
+    MUSIC_QUEUE.clear()
     idx = idx % len(LOFI_STATIONS)
     LOFI_STATE["idx"] = idx
     _key, title, url = LOFI_STATIONS[idx]
+    NOW_PLAYING["track"] = {"title": title, "url": url, "webpage": "", "requester": "Radio 24/7"}
     if vc.is_playing() or vc.is_paused():
         vc.stop()
     source = discord.FFmpegPCMAudio(url, before_options=FFMPEG_BEFORE, options="-vn")
@@ -726,11 +799,24 @@ def _play_station(vc, idx):
     return title
 
 
+def _music_embed(track, channel_name):
+    title = track["title"]
+    link = f"[{title}]({track['webpage']})" if track.get("webpage") else f"**{title}**"
+    q_info = f"\nAntrian berikutnya: **{len(MUSIC_QUEUE)}** lagu" if MUSIC_QUEUE else ""
+    e = discord.Embed(
+        title="🎵 ╎ Sedang Diputar",
+        description=f"{link}\nVoice: **{channel_name}**{q_info}",
+        colour=0x9B59B6,
+    )
+    e.set_footer(text=f"Diminta oleh {track.get('requester', 'member')} • !play <judul> | !skip | !stop")
+    return e
+
+
 def _lofi_embed(title, channel_name):
     e = discord.Embed(
         title="🎧 ╎ Lofi Radio 24/7",
         description=f"Sedang memutar **{title}** di **{channel_name}**\n"
-                    f"Perintah: `!lofi` • `!lofi next` • `!lofi stop`",
+                    f"Perintah: `!lofi` • `!lofi next` • `!play <judul>` • `!stop`",
         colour=0x9B59B6,
     )
     e.set_footer(text="Otomatis keluar jika voice kosong")
@@ -741,74 +827,119 @@ class LofiView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Ganti Stasiun", emoji="⏭️", style=discord.ButtonStyle.primary, custom_id="lofi_next")
+    @discord.ui.button(label="Skip / Ganti", emoji="⏭️", style=discord.ButtonStyle.primary, custom_id="lofi_next")
     async def next_btn(self, interaction, _b):
         vc = interaction.guild.voice_client
         if not vc or not vc.is_connected():
             await interaction.response.send_message("🔇 Bot tidak sedang di voice channel.", ephemeral=True)
+            return
+        if MUSIC_QUEUE:
+            vc.stop()
+            await interaction.response.send_message("⏭️ Lagu di-skip!", ephemeral=True)
             return
         title = _play_station(vc, LOFI_STATE["idx"] + 1)
         await interaction.response.edit_message(embed=_lofi_embed(title, vc.channel.name), view=self)
 
     @discord.ui.button(label="Stop", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="lofi_stop")
     async def stop_btn(self, interaction, _b):
+        MUSIC_QUEUE.clear()
+        NOW_PLAYING["track"] = None
         vc = interaction.guild.voice_client
         if vc:
             vc.stop()
             await vc.disconnect()
         await interaction.response.edit_message(
-            embed=discord.Embed(title="⏹️ ╎ Lofi Radio Dimatikan", colour=0x99AAB5), view=None
+            embed=discord.Embed(title="⏹️ ╎ Musik Dimatikan", colour=0x99AAB5), view=None
         )
 
 
-async def handle_lofi_command(msg, text):
-    parts = text.split(maxsplit=2)
-    arg = parts[1].lower() if len(parts) > 1 else "play"
+async def _ensure_voice(msg):
+    if not msg.author.voice or not msg.author.voice.channel:
+        await msg.reply("🎧 Masuk ke voice channel dulu!", mention_author=False)
+        return None
+    voice_ch = msg.author.voice.channel
+    vc = msg.guild.voice_client
+    if vc and vc.is_connected():
+        if vc.channel.id != voice_ch.id:
+            await vc.move_to(voice_ch)
+        return vc
+    return await voice_ch.connect()
+
+
+async def handle_music_command(msg, text):
+    parts = text.split(maxsplit=1)
+    cmd = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
     guild = msg.guild
     vc = guild.voice_client
 
-    if arg in ("stop", "leave", "keluar", "mati"):
+    if cmd in ("!stop", "!leave") or (cmd == "!lofi" and arg.lower() in ("stop", "leave", "keluar", "mati")):
+        MUSIC_QUEUE.clear()
+        NOW_PLAYING["track"] = None
         if not vc:
-            await msg.reply("🔇 Bot tidak sedang berada di voice channel.", mention_author=False)
+            await msg.reply("🔇 Bot tidak sedang di voice channel.", mention_author=False)
             return
         vc.stop()
         await vc.disconnect()
-        await msg.reply("⏹️ Lofi Radio dimatikan & keluar dari voice.", mention_author=False)
+        await msg.reply("⏹️ Musik dimatikan & keluar dari voice.", mention_author=False)
         return
 
-    if arg in ("list", "stations", "stasiun"):
+    if cmd in ("!queue", "!q"):
+        cur = NOW_PLAYING.get("track")
+        lines = [f"**Sedang diputar:** {cur['title']}" if cur else "**Sedang diputar:** tidak ada"]
+        for i, t in enumerate(MUSIC_QUEUE[:10], 1):
+            lines.append(f"`{i}.` {t['title']}")
+        await msg.reply(embed=discord.Embed(title="🎶 Antrian Lagu", description="\n".join(lines), colour=0x9B59B6),
+                        mention_author=False)
+        return
+
+    if cmd in ("!skip", "!next") or (cmd == "!lofi" and arg.lower() in ("next", "skip")):
+        if not vc or not vc.is_connected():
+            await msg.reply("🔇 Bot tidak sedang di voice.", mention_author=False)
+            return
+        if MUSIC_QUEUE:
+            vc.stop()
+            await msg.reply("⏭️ Skip ke lagu berikutnya.", mention_author=False)
+        else:
+            title = _play_station(vc, LOFI_STATE["idx"] + 1)
+            await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
+        return
+
+    if cmd == "!lofi" and arg.lower() in ("list", "stations", "stasiun"):
         lines = "\n".join(f"• `{k}` — {t}" for k, t, _ in LOFI_STATIONS)
         await msg.reply(embed=discord.Embed(title="📻 Daftar Stasiun Lofi", description=lines, colour=0x9B59B6),
                         mention_author=False)
         return
 
-    if arg in ("next", "skip"):
-        if not vc or not vc.is_connected():
-            await msg.reply("🔇 Bot belum masuk voice. Masuk voice dulu lalu ketik `!lofi`.", mention_author=False)
+    # !lofi with no arg or known station key -> 24/7 radio
+    station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
+    if cmd == "!lofi" and (not arg or arg.lower() in station_keys):
+        vc = await _ensure_voice(msg)
+        if not vc:
             return
-        title = _play_station(vc, LOFI_STATE["idx"] + 1)
+        idx = station_keys.get(arg.lower(), LOFI_STATE["idx"])
+        title = _play_station(vc, idx)
         await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
         return
 
-    # play / station name
-    target_idx = LOFI_STATE["idx"]
-    for i, (k, _t, _u) in enumerate(LOFI_STATIONS):
-        if arg == k:
-            target_idx = i
-            break
-
-    if not msg.author.voice or not msg.author.voice.channel:
-        await msg.reply("🎧 Masuk ke voice channel dulu, lalu ketik `!lofi`!", mention_author=False)
+    # Search & play by song title (!play <judul>, !p <judul>, or !lofi <judul>)
+    query = arg
+    if not query:
+        await msg.reply("🔎 Tulis judul lagunya, contoh: `!play lofi hip hop` atau `!play judul lagu`", mention_author=False)
         return
-    voice_ch = msg.author.voice.channel
-    if vc and vc.is_connected():
-        if vc.channel.id != voice_ch.id:
-            await vc.move_to(voice_ch)
+    vc = await _ensure_voice(msg)
+    if not vc:
+        return
+    async with msg.channel.typing():
+        track = await asyncio.to_thread(_search_track, query)
+    track["requester"] = msg.author.display_name
+    if vc.is_playing() or vc.is_paused():
+        MUSIC_QUEUE.append(track)
+        await msg.reply(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**", mention_author=False)
     else:
-        vc = await voice_ch.connect()
-
-    title = _play_station(vc, target_idx)
-    await msg.reply(embed=_lofi_embed(title, voice_ch.name), view=LofiView(), mention_author=False)
+        MUSIC_QUEUE.append(track)
+        _play_next_in_queue(guild, msg.channel)
+        await msg.reply(embed=_music_embed(track, vc.channel.name), view=LofiView(), mention_author=False)
 
 
 async def background_qa_and_autorole():
@@ -882,12 +1013,13 @@ async def on_message(msg):
         except Exception:
             pass
     text = msg.content.strip()
-    if text.lower().startswith("!lofi"):
+    cmd_word = text.split(maxsplit=1)[0].lower() if text else ""
+    if cmd_word in ("!lofi", "!play", "!p", "!skip", "!next", "!queue", "!q", "!stop", "!leave"):
         try:
-            await handle_lofi_command(msg, text)
+            await handle_music_command(msg, text)
         except Exception as exc:
-            log("lofi error:", exc)
-            await msg.reply(f"❌ Gagal memutar lofi: `{str(exc)[:200]}`", mention_author=False)
+            log("music error:", exc)
+            await msg.reply(f"❌ Gagal memutar musik: `{str(exc)[:200]}`", mention_author=False)
         return
     if msg.author.id != OWNER_ID or msg.channel.id != COMMANDS_CHANNEL:
         return
