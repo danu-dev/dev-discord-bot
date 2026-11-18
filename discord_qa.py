@@ -27,16 +27,23 @@ API = "https://discord.com/api/v10"
 AUDIT_REASON = "QA check"
 
 # --- expected state -------------------------------------------------------
-EXPECT_CATEGORIES = ["START HERE", "COMMUNITY", "GAMING", "EVENTS", "VOICE", "STAFF"]
+EXPECT_CATEGORIES = [
+    "╔══〔 📌 START HERE 〕══╗",
+    "╔══〔 💬 COMMUNITY 〕══╗",
+    "╔══〔 🎮 GAMING 〕══╗",
+    "╔══〔 🎉 EVENTS 〕══╗",
+    "╔══〔 🔊 VOICE LOUNGE 〕══╗",
+    "╔══〔 🔒 STAFF ONLY 〕══╗",
+]
 EXPECT_CHANNELS = {
-    "START HERE": [("rules", 0), ("welcome", 0), ("announcements", 0)],
-    "COMMUNITY": [("general", 0), ("introductions", 0), ("off-topic", 0), ("media", 0), ("bot-commands", 0)],
-    "GAMING": [("game-chat", 0), ("looking-for-group", 15), ("clips-and-highlights", 0)],
-    "EVENTS": [("events", 0), ("event-chat", 0)],
-    "VOICE": [("Lobby", 2), ("Squad 1", 2), ("Squad 2", 2), ("AFK", 2), ("➕ ╎ Buat Room", 2)],
-    "STAFF": [("staff-chat", 0), ("mod-log", 0), ("Staff Room", 2)],
+    "╔══〔 📌 START HERE 〕══╗": [("📜╎rules", 0), ("👋╎welcome", 0), ("📢╎announcements", 0)],
+    "╔══〔 💬 COMMUNITY 〕══╗": [("💬╎general", 0), ("🪪╎introductions", 0), ("🎲╎off-topic", 0), ("📸╎media", 0), ("🤖╎bot-commands", 0)],
+    "╔══〔 🎮 GAMING 〕══╗": [("🕹️╎game-chat", 0), ("🔎╎looking-for-group", 15), ("🎬╎clips-highlights", 0)],
+    "╔══〔 🎉 EVENTS 〕══╗": [("📅╎events", 0), ("🎊╎event-chat", 0)],
+    "╔══〔 🔊 VOICE LOUNGE 〕══╗": [("🎧 ╎ Lobby", 2), ("🎮 ╎ Squad 1", 2), ("🎮 ╎ Squad 2", 2), ("💤 ╎ AFK", 2), ("➕ ╎ Buat Room", 2)],
+    "╔══〔 🔒 STAFF ONLY 〕══╗": [("🛡️╎staff-chat", 0), ("📋╎mod-log", 0), ("🎙️ ╎ Staff Room", 2)],
 }
-READ_ONLY = ["rules", "welcome", "announcements"]
+READ_ONLY = ["📜╎rules", "👋╎welcome", "📢╎announcements"]
 REQUIRED_ROLES = [
     "BOT-ADMIN",
     "BOT-QA",
@@ -203,11 +210,11 @@ def check_guild_settings(d, out):
     if (g.get("explicit_content_filter") or 0) < 1:
         problems.append("explicit_content_filter mati")
     names = {c["id"]: c["name"] for c in d["channels"]}
-    if names.get(g.get("rules_channel_id")) != "rules":
+    if names.get(g.get("rules_channel_id")) != "📜╎rules":
         problems.append("rules_channel tidak menunjuk #rules")
-    if names.get(g.get("system_channel_id")) != "welcome":
+    if names.get(g.get("system_channel_id")) != "👋╎welcome":
         problems.append("system_channel tidak menunjuk #welcome")
-    if names.get(g.get("afk_channel_id")) != "AFK":
+    if names.get(g.get("afk_channel_id")) != "💤 ╎ AFK":
         problems.append("afk_channel tidak menunjuk voice AFK")
     out.append((not problems, "; ".join(problems) if problems else
                 "verification=medium, filter aktif, rules/system/afk terhubung"))
