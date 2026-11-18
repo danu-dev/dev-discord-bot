@@ -721,7 +721,7 @@ FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 def _search_track(query):
     import yt_dlp
     opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[protocol^=http][ext!=m3u8]/bestaudio/best",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -745,10 +745,22 @@ def _search_track(query):
                     "title": info.get("title") or query,
                     "url": stream_url,
                     "webpage": info.get("webpage_url") or "",
+                    "headers": info.get("http_headers") or {},
                 }
             except Exception as exc:
                 last_err = exc
     raise RuntimeError(f"Lagu tidak ditemukan ({last_err or 'kosong'})")
+
+
+def _make_audio_source(url, headers=None):
+    is_hls = ".m3u8" in url
+    before = [] if is_hls else [FFMPEG_BEFORE]
+    if headers:
+        hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer"))
+        if hdr:
+            before.append(f'-headers "{hdr}"')
+    raw = discord.FFmpegPCMAudio(url, before_options=" ".join(before) or None, options="-vn")
+    return discord.PCMVolumeTransformer(raw, volume=0.6)
 
 
 def _play_next_in_queue(guild, text_channel=None):
@@ -762,12 +774,12 @@ def _play_next_in_queue(guild, text_channel=None):
         return
     track = MUSIC_QUEUE.pop(0)
     NOW_PLAYING["track"] = track
-    source = discord.FFmpegPCMAudio(track["url"], before_options=FFMPEG_BEFORE, options="-vn")
+    source = _make_audio_source(track["url"], track.get("headers"))
 
     def _after(err):
         if err:
             log("music stream err:", err)
-        fut = asyncio.run_coroutine_threadsafe(_on_track_end(guild, text_channel), client.loop)
+        fut = asyncio.run_coroutine_threadsafe(_on_track_end(guild, text_channel, err), client.loop)
         try:
             fut.result()
         except Exception:
@@ -776,7 +788,9 @@ def _play_next_in_queue(guild, text_channel=None):
     vc.play(source, after=_after)
 
 
-async def _on_track_end(guild, text_channel):
+async def _on_track_end(guild, text_channel, err=None):
+    if err and text_channel:
+        await text_channel.send(f"⚠️ Error audio stream: `{str(err)[:160]}`")
     if MUSIC_QUEUE:
         _play_next_in_queue(guild, text_channel)
         t = NOW_PLAYING["track"]
@@ -794,7 +808,7 @@ def _play_station(vc, idx):
     NOW_PLAYING["track"] = {"title": title, "url": url, "webpage": "", "requester": "Radio 24/7"}
     if vc.is_playing() or vc.is_paused():
         vc.stop()
-    source = discord.FFmpegPCMAudio(url, before_options=FFMPEG_BEFORE, options="-vn")
+    source = _make_audio_source(url)
     vc.play(source, after=lambda err: log("lofi stream end:", err) if err else None)
     return title
 
@@ -862,8 +876,11 @@ async def _ensure_voice(msg):
     if vc and vc.is_connected():
         if vc.channel.id != voice_ch.id:
             await vc.move_to(voice_ch)
+            await asyncio.sleep(0.4)
         return vc
-    return await voice_ch.connect()
+    vc = await voice_ch.connect(timeout=30, self_deaf=True)
+    await asyncio.sleep(0.5)
+    return vc
 
 
 async def handle_music_command(msg, text):
