@@ -27,13 +27,13 @@ import discord
 
 GUILD_ID = 1572541420298829834
 OWNER_ID = 1409498347294822502
-COMMANDS_CHANNEL = 1572669201980727439
-QA_CHANNEL = 1572669204497301575
-BOT_CATEGORY = 1572549198719484065
-IDEAS_CHANNEL = 1572654533484609744
-STATS_CHANNEL = 1572654530338889841
-WELCOME_CHANNEL = 1572549312880189461
-MEMBER_ROLE_ID = 1572549618057613332
+COMMANDS_CHANNEL = 1572712087208329317  # #bot-commands
+QA_CHANNEL = 1572712112260653246        # #mod-log
+BOT_CATEGORY = 1572712069038604348      # #STAFF
+IDEAS_CHANNEL = 0
+STATS_CHANNEL = 1572712087208329317
+WELCOME_CHANNEL = 1572712074390544465   # #welcome
+MEMBER_ROLE_ID = 1572712053175754883    # Member
 DISCORD_TOKEN_FILE = "/root/.config/opencode/secrets/discord.token"
 GEMINI_KEY_FILE = "/root/.config/opencode/secrets/gemini.key"
 GROQ_KEY_FILE = "/root/.config/opencode/secrets/groq.key"
@@ -698,7 +698,6 @@ async def on_voice_state_update(member, before, after):
 
 async def background_qa_and_autorole():
     await client.wait_until_ready()
-    last_failures = None
     while not client.is_closed():
         try:
             guild = client.get_guild(GUILD_ID)
@@ -711,16 +710,6 @@ async def background_qa_and_autorole():
                                 await m.add_roles(member_role, reason="Auto-assign role Member")
                             except Exception:
                                 pass
-            results, _ = await asyncio.to_thread(qa.run_pass)
-            fails = sorted(f"{n}: {d}" for n, ok, d in results if not ok)
-            key = tuple(fails)
-            if key != last_failures and (last_failures is not None or fails):
-                ch = client.get_channel(QA_CHANNEL)
-                if ch:
-                    verdict = "🟢 QA PASS" if not fails else f"🔴 QA FAIL — {len(fails)} masalah"
-                    body = verdict + ("\n" + "\n".join(f"• {f}" for f in fails[:12]) if fails else "")
-                    await ch.send(body[:1900])
-                last_failures = key
         except Exception as exc:
             log("bg loop error:", exc)
         await asyncio.sleep(300)
@@ -756,9 +745,9 @@ async def on_member_join(member):
         e = discord.Embed(
             title="👋 ╎ Member Baru Bergabung!",
             description=f"Selamat datang {member.mention} di **{member.guild.name}**! 🎉\n"
-                        f"• Baca aturan di <#1572549308568571915>\n"
-                        f"• Ambil role kamu di <#1572549312880189461>\n"
-                        f"• Mulai ngobrol di <#1572541421779689474>",
+                        f"• Baca aturan di <#1572712072179879996>\n"
+                        f"• Kenalan di <#1572712080341991554>\n"
+                        f"• Mulai ngobrol di <#1572712078295437413>",
             colour=0xEB459E,
         )
         e.set_thumbnail(url=member.display_avatar.url)
