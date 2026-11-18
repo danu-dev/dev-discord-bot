@@ -106,7 +106,7 @@ Aksi (pakai nama persis dari state server; maks 15):
 - send_embed: channel, title, description, color(#RRGGBB)
 - purge_messages: channel, limit(int)
 
-Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room", auto-react 👍👎 di #ideas-hub.
+Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, !lofi [play|next|stop], auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room".
 Aturan ketat:
 1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru (mis. sistem /suggestion, ticket, leveling), jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
 2. Jika hanya ngobrol/tanya/komplain, jawab ringkas & jelas di "reply" dengan actions [].
@@ -627,6 +627,7 @@ HELP = discord.Embed(
 HELP.add_field(name="!qa", value="Cek struktur server", inline=True)
 HELP.add_field(name="!qa test", value="Tes langsung", inline=True)
 HELP.add_field(name="!reset", value="Hapus ingatan chat AI", inline=True)
+HELP.add_field(name="!lofi", value="Putar radio lofi 24/7 di voice (`!lofi next` / `!lofi stop`)", inline=False)
 HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
 
 
@@ -694,6 +695,120 @@ async def on_voice_state_update(member, before, after):
             await before.channel.delete(reason="Temp voice kosong")
         except Exception:
             pass
+    vc = member.guild.voice_client
+    if vc and vc.channel and all(m.bot for m in vc.channel.members):
+        try:
+            vc.stop()
+            await vc.disconnect()
+        except Exception:
+            pass
+
+
+# --- Lofi Music Radio -----------------------------------------------------
+LOFI_STATIONS = [
+    ("lofi", "☕ Lofi Beats Radio", "https://play.streamafrica.net/lofiradio"),
+    ("chillsynth", "🌃 Nightride Chillsynth", "https://stream.nightride.fm/chillsynth.mp3"),
+    ("groove", "🌿 SomaFM Groove Salad", "https://ice2.somafm.com/groovesalad-128-mp3"),
+    ("lush", "🌙 SomaFM Lush", "https://ice2.somafm.com/lush-128-mp3"),
+]
+LOFI_STATE = {"idx": 0}
+FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+
+
+def _play_station(vc, idx):
+    idx = idx % len(LOFI_STATIONS)
+    LOFI_STATE["idx"] = idx
+    _key, title, url = LOFI_STATIONS[idx]
+    if vc.is_playing() or vc.is_paused():
+        vc.stop()
+    source = discord.FFmpegPCMAudio(url, before_options=FFMPEG_BEFORE, options="-vn")
+    vc.play(source, after=lambda err: log("lofi stream end:", err) if err else None)
+    return title
+
+
+def _lofi_embed(title, channel_name):
+    e = discord.Embed(
+        title="🎧 ╎ Lofi Radio 24/7",
+        description=f"Sedang memutar **{title}** di **{channel_name}**\n"
+                    f"Perintah: `!lofi` • `!lofi next` • `!lofi stop`",
+        colour=0x9B59B6,
+    )
+    e.set_footer(text="Otomatis keluar jika voice kosong")
+    return e
+
+
+class LofiView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Ganti Stasiun", emoji="⏭️", style=discord.ButtonStyle.primary, custom_id="lofi_next")
+    async def next_btn(self, interaction, _b):
+        vc = interaction.guild.voice_client
+        if not vc or not vc.is_connected():
+            await interaction.response.send_message("🔇 Bot tidak sedang di voice channel.", ephemeral=True)
+            return
+        title = _play_station(vc, LOFI_STATE["idx"] + 1)
+        await interaction.response.edit_message(embed=_lofi_embed(title, vc.channel.name), view=self)
+
+    @discord.ui.button(label="Stop", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="lofi_stop")
+    async def stop_btn(self, interaction, _b):
+        vc = interaction.guild.voice_client
+        if vc:
+            vc.stop()
+            await vc.disconnect()
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="⏹️ ╎ Lofi Radio Dimatikan", colour=0x99AAB5), view=None
+        )
+
+
+async def handle_lofi_command(msg, text):
+    parts = text.split(maxsplit=2)
+    arg = parts[1].lower() if len(parts) > 1 else "play"
+    guild = msg.guild
+    vc = guild.voice_client
+
+    if arg in ("stop", "leave", "keluar", "mati"):
+        if not vc:
+            await msg.reply("🔇 Bot tidak sedang berada di voice channel.", mention_author=False)
+            return
+        vc.stop()
+        await vc.disconnect()
+        await msg.reply("⏹️ Lofi Radio dimatikan & keluar dari voice.", mention_author=False)
+        return
+
+    if arg in ("list", "stations", "stasiun"):
+        lines = "\n".join(f"• `{k}` — {t}" for k, t, _ in LOFI_STATIONS)
+        await msg.reply(embed=discord.Embed(title="📻 Daftar Stasiun Lofi", description=lines, colour=0x9B59B6),
+                        mention_author=False)
+        return
+
+    if arg in ("next", "skip"):
+        if not vc or not vc.is_connected():
+            await msg.reply("🔇 Bot belum masuk voice. Masuk voice dulu lalu ketik `!lofi`.", mention_author=False)
+            return
+        title = _play_station(vc, LOFI_STATE["idx"] + 1)
+        await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
+        return
+
+    # play / station name
+    target_idx = LOFI_STATE["idx"]
+    for i, (k, _t, _u) in enumerate(LOFI_STATIONS):
+        if arg == k:
+            target_idx = i
+            break
+
+    if not msg.author.voice or not msg.author.voice.channel:
+        await msg.reply("🎧 Masuk ke voice channel dulu, lalu ketik `!lofi`!", mention_author=False)
+        return
+    voice_ch = msg.author.voice.channel
+    if vc and vc.is_connected():
+        if vc.channel.id != voice_ch.id:
+            await vc.move_to(voice_ch)
+    else:
+        vc = await voice_ch.connect()
+
+    title = _play_station(vc, target_idx)
+    await msg.reply(embed=_lofi_embed(title, voice_ch.name), view=LofiView(), mention_author=False)
 
 
 async def background_qa_and_autorole():
@@ -730,6 +845,7 @@ def start_health_server():
 @client.event
 async def on_ready():
     client.add_view(RolePickerView())
+    client.add_view(LofiView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         client.loop.create_task(background_qa_and_autorole())
@@ -765,9 +881,16 @@ async def on_message(msg):
             await msg.add_reaction("👎")
         except Exception:
             pass
+    text = msg.content.strip()
+    if text.lower().startswith("!lofi"):
+        try:
+            await handle_lofi_command(msg, text)
+        except Exception as exc:
+            log("lofi error:", exc)
+            await msg.reply(f"❌ Gagal memutar lofi: `{str(exc)[:200]}`", mention_author=False)
+        return
     if msg.author.id != OWNER_ID or msg.channel.id != COMMANDS_CHANNEL:
         return
-    text = msg.content.strip()
     if not text:
         return
     guild = msg.guild
