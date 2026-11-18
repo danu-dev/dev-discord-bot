@@ -27,13 +27,18 @@ import discord
 
 GUILD_ID = 1572541420298829834
 OWNER_ID = 1409498347294822502
-COMMANDS_CHANNEL = 1572712087208329317  # #bot-commands
-QA_CHANNEL = 1572712112260653246        # #mod-log
-BOT_CATEGORY = 1572712069038604348      # #STAFF
+COMMANDS_CHANNEL = 1572712087208329317  # #🤖╎bot-commands
+QA_CHANNEL = 1572712112260653246        # #📋╎mod-log
+MODLOG_CHANNEL = 1572712112260653246    # #📋╎mod-log
+BOT_CATEGORY = 1572712069038604348      # #╔══〔 🔒 STAFF ONLY 〕══╗
+COMMUNITY_CATEGORY = 1572712060922364085
 IDEAS_CHANNEL = 0
 STATS_CHANNEL = 1572712087208329317
-WELCOME_CHANNEL = 1572712074390544465   # #welcome
+WELCOME_CHANNEL = 1572712074390544465   # #👋╎welcome
 MEMBER_ROLE_ID = 1572712053175754883    # Member
+MOD_ROLE_ID = 1572712033500135605       # Moderator
+FOUNDER_ROLE_ID = 1572717150089650238   # 👑 ╎ Founder
+XP_FILE = os.environ.get("XP_FILE", "dev-xp-data.json")
 DISCORD_TOKEN_FILE = "/root/.config/opencode/secrets/discord.token"
 GEMINI_KEY_FILE = "/root/.config/opencode/secrets/gemini.key"
 GROQ_KEY_FILE = "/root/.config/opencode/secrets/groq.key"
@@ -106,7 +111,7 @@ Aksi (pakai nama persis dari state server; maks 15):
 - send_embed: channel, title, description, color(#RRGGBB)
 - purge_messages: channel, limit(int)
 
-Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, !play <judul>, !skip, !queue, !stop, !lofi [next|stop], auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room".
+Fitur bot yang BENAR-BENAR ADA: /suggestion, /rank, /leaderboard, !help, !qa, !qa test, !stats, !panel-role, !panel-ticket, !reset, auto-role Member, welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
 Aturan ketat:
 1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru (mis. sistem /suggestion, ticket, leveling), jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
 2. Jika hanya ngobrol/tanya/komplain, jawab ringkas & jelas di "reply" dengan actions [].
@@ -611,33 +616,33 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 client = discord.Client(intents=intents)
+tree = discord.app_commands.CommandTree(client)
 
 HELP = discord.Embed(
     title="🤖 ╎ DEV AI Assistant",
     colour=BLURPLE,
     description=(
-        "Khusus owner. Sekarang mendukung **Full Kontrol Server** & **Ingatan Percakapan**.\n\n"
-        "Contoh perintah:\n"
+        "Khusus owner di `#🤖╎bot-commands`. Mendukung **Full Kontrol Server** & **Ingatan Percakapan**.\n\n"
+        "Contoh perintah AI:\n"
         "> bikinin kategori 🎮 GAMING isi #mabar dan voice Mabar 1\n"
-        "> kasih role VIP ke putra\n"
-        "> hapus channel #tes-ai / hapus role Tes\n"
-        "> ubah topik #general jadi ... / hapus 10 pesan terakhir di #general\n\n"
+        "> kasih role Moderator ke putra\n"
+        "> ubah topik #💬╎general jadi ...\n\n"
         "Semua perubahan **ditampilkan dulu**, baru jalan setelah kamu tekan ✅."),
 )
-HELP.add_field(name="!qa", value="Cek struktur server", inline=True)
-HELP.add_field(name="!qa test", value="Tes langsung", inline=True)
-HELP.add_field(name="!reset", value="Hapus ingatan chat AI", inline=True)
-HELP.add_field(name="!lofi", value="Radio lofi 24/7 (`!lofi next` / `!lofi stop`)", inline=True)
-HELP.add_field(name="!play <judul>", value="Cari & putar lagu sesuai judul (`!skip`, `!queue`, `!stop`)", inline=True)
+HELP.add_field(name="Admin Commands", value="`!qa` • `!qa test` • `!stats` • `!reset`", inline=False)
+HELP.add_field(name="Panel Komunitas", value="`!panel-role` • `!panel-ticket`", inline=True)
+HELP.add_field(name="Slash Commands Member", value="`/suggestion` • `/rank` • `/leaderboard`", inline=True)
 HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
 
 
-# --- Extra Features (Role Picker, Temp Voice, Auto-Ideas, Live Stats) -----
+# --- Extra Features (Role Picker, Suggestion, Ticket, XP, Mod-Log, Temp Voice)
 ROLE_PICKER_MAP = {
-    "pick_dev": ("💻 ╎ Developer", "💻 Developer"),
-    "pick_qa": ("🧪 ╎ QA Tester", "🧪 QA Tester"),
-    "pick_creator": ("🎨 ╎ Creator", "🎨 Creator"),
-    "pick_gamer": ("🎮 ╎ Gamer", "🎮 Gamer"),
+    "pick_pc": ("PC", "🖥️ PC"),
+    "pick_ps": ("PlayStation", "🎮 PlayStation"),
+    "pick_xbox": ("Xbox", "🟩 Xbox"),
+    "pick_mobile": ("Mobile", "📱 Mobile"),
+    "pick_switch": ("Nintendo Switch", "🍄 Switch"),
+    "pick_lfg": ("Looking for Group", "🔎 LFG"),
 }
 TEMP_VOICE_HUB_NAME = "➕ ╎ Buat Room"
 TEMP_VOICE_IDS = set()
@@ -659,21 +664,243 @@ class RolePickerView(discord.ui.View):
             await interaction.user.add_roles(r, reason="Self-role toggle")
             await interaction.response.send_message(f"✅ Role **{label}** dipasang!", ephemeral=True)
 
-    @discord.ui.button(label="Developer", emoji="💻", style=discord.ButtonStyle.primary, custom_id="pick_dev")
-    async def dev_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_dev"])
+    @discord.ui.button(label="PC", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="pick_pc")
+    async def pc_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_pc"])
 
-    @discord.ui.button(label="QA Tester", emoji="🧪", style=discord.ButtonStyle.success, custom_id="pick_qa")
-    async def qa_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_qa"])
+    @discord.ui.button(label="PlayStation", emoji="🎮", style=discord.ButtonStyle.primary, custom_id="pick_ps")
+    async def ps_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_ps"])
 
-    @discord.ui.button(label="Creator", emoji="🎨", style=discord.ButtonStyle.secondary, custom_id="pick_creator")
-    async def creator_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_creator"])
+    @discord.ui.button(label="Xbox", emoji="🟩", style=discord.ButtonStyle.success, custom_id="pick_xbox")
+    async def xbox_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_xbox"])
 
-    @discord.ui.button(label="Gamer", emoji="🎮", style=discord.ButtonStyle.secondary, custom_id="pick_gamer")
-    async def gamer_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_gamer"])
+    @discord.ui.button(label="Mobile", emoji="📱", style=discord.ButtonStyle.secondary, custom_id="pick_mobile")
+    async def mobile_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_mobile"])
+
+    @discord.ui.button(label="Switch", emoji="🍄", style=discord.ButtonStyle.danger, custom_id="pick_switch")
+    async def switch_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_switch"])
+
+    @discord.ui.button(label="LFG", emoji="🔎", style=discord.ButtonStyle.secondary, custom_id="pick_lfg")
+    async def lfg_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_lfg"])
+
+
+# --- Suggestion System (/suggestion) --------------------------------------
+SUGGEST_VOTES = {}  # message_id -> {"up": set(uid), "down": set(uid)}
+
+
+class SuggestionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _vote(self, interaction, kind):
+        mid = interaction.message.id
+        v = SUGGEST_VOTES.setdefault(mid, {"up": set(), "down": set()})
+        uid = interaction.user.id
+        other = "down" if kind == "up" else "up"
+        v[other].discard(uid)
+        if uid in v[kind]:
+            v[kind].discard(uid)
+        else:
+            v[kind].add(uid)
+        e = interaction.message.embeds[0]
+        e.set_footer(text=f"👍 {len(v['up'])} Setuju  •  👎 {len(v['down'])} Tolak")
+        await interaction.response.edit_message(embed=e, view=self)
+
+    @discord.ui.button(label="Setuju", emoji="👍", style=discord.ButtonStyle.success, custom_id="suggest_up")
+    async def up_btn(self, interaction, _b):
+        await self._vote(interaction, "up")
+
+    @discord.ui.button(label="Tolak", emoji="👎", style=discord.ButtonStyle.danger, custom_id="suggest_down")
+    async def down_btn(self, interaction, _b):
+        await self._vote(interaction, "down")
+
+
+@tree.command(name="suggestion", description="Kirim saran untuk server DEV", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(ide="Tulis saran atau ide kamu")
+async def slash_suggestion(interaction: discord.Interaction, ide: str):
+    e = discord.Embed(title="💡 ╎ Saran Baru", description=ide[:2000], colour=GOLD)
+    e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    e.set_footer(text="👍 0 Setuju  •  👎 0 Tolak")
+    await interaction.response.send_message(embed=e, view=SuggestionView())
+    msg = await interaction.original_response()
+    try:
+        await msg.create_thread(name=f"Diskusi: {ide[:60]}")
+    except Exception:
+        pass
+
+
+# --- Ticket Support System ------------------------------------------------
+class TicketCloseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Tutup Ticket", emoji="🔒", style=discord.ButtonStyle.danger, custom_id="ticket_close")
+    async def close_btn(self, interaction, _b):
+        await interaction.response.send_message("🔒 Ticket ditutup dalam 3 detik…")
+        await asyncio.sleep(3)
+        await interaction.channel.delete(reason=f"Ticket ditutup oleh {interaction.user}")
+
+
+class TicketLauncherView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Buka Ticket", emoji="🎫", style=discord.ButtonStyle.primary, custom_id="ticket_open")
+    async def open_btn(self, interaction, _b):
+        guild = interaction.guild
+        safe = "".join(c for c in interaction.user.name.lower() if c.isalnum() or c == "-")[:18] or "user"
+        cname = f"ticket-{safe}"
+        existing = discord.utils.get(guild.text_channels, name=cname)
+        if existing:
+            await interaction.response.send_message(f"🎫 Ticket kamu sudah ada: {existing.mention}", ephemeral=True)
+            return
+        cat = guild.get_channel(COMMUNITY_CATEGORY)
+        ow = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+        }
+        for rid in (MOD_ROLE_ID, FOUNDER_ROLE_ID):
+            role = guild.get_role(rid)
+            if role:
+                ow[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        ch = await guild.create_text_channel(cname, category=cat, overwrites=ow, reason="Support Ticket")
+        e = discord.Embed(
+            title="🎫 ╎ Ticket Support",
+            description=f"Halo {interaction.user.mention}, silakan jelaskan kendala atau pertanyaanmu di sini.\n"
+                        f"Staff akan segera membantu!",
+            colour=BLURPLE,
+        )
+        await ch.send(embed=e, view=TicketCloseView())
+        await interaction.response.send_message(f"✅ Ticket dibuat: {ch.mention}", ephemeral=True)
+
+
+# --- XP & Leveling --------------------------------------------------------
+XP_DATA = {}
+XP_COOLDOWN = {}  # user_id -> last_timestamp
+if os.path.exists(XP_FILE):
+    try:
+        XP_DATA = json.loads(read(XP_FILE))
+    except Exception:
+        XP_DATA = {}
+
+
+def _save_xp():
+    try:
+        with open(XP_FILE, "w", encoding="utf-8") as fh:
+            json.dump(XP_DATA, fh)
+    except Exception:
+        pass
+
+
+def _xp_level(xp):
+    lvl = 0
+    while xp >= (lvl + 1) * (lvl + 1) * 100:
+        lvl += 1
+    return lvl
+
+
+def _award_xp(user_id):
+    import random
+    now = time.monotonic()
+    if now - XP_COOLDOWN.get(user_id, 0) < 30:
+        return None
+    XP_COOLDOWN[user_id] = now
+    uid = str(user_id)
+    old_xp = XP_DATA.get(uid, 0)
+    new_xp = old_xp + random.randint(15, 25)
+    XP_DATA[uid] = new_xp
+    _save_xp()
+    old_lvl, new_lvl = _xp_level(old_xp), _xp_level(new_xp)
+    return new_lvl if new_lvl > old_lvl else None
+
+
+def _rank_embed(member):
+    xp = XP_DATA.get(str(member.id), 0)
+    lvl = _xp_level(xp)
+    next_xp = (lvl + 1) * (lvl + 1) * 100
+    e = discord.Embed(title=f"🏅 ╎ Rank {member.display_name}", colour=GOLD)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name="Level", value=f"**{lvl}**", inline=True)
+    e.add_field(name="XP", value=f"**{xp}** / {next_xp}", inline=True)
+    return e
+
+
+def _leaderboard_embed(guild):
+    top = sorted(XP_DATA.items(), key=lambda kv: -kv[1])[:10]
+    lines = []
+    for i, (uid, xp) in enumerate(top, 1):
+        m = guild.get_member(int(uid))
+        name = m.display_name if m else f"User {uid}"
+        lines.append(f"`{i}.` **{name}** — Level **{_xp_level(xp)}** ({xp} XP)")
+    return discord.Embed(
+        title=f"🏆 ╎ Leaderboard {guild.name}",
+        description="\n".join(lines) or "Belum ada data XP.",
+        colour=GOLD,
+    )
+
+
+@tree.command(name="rank", description="Cek level & XP kamu", guild=discord.Object(id=GUILD_ID))
+async def slash_rank(interaction: discord.Interaction, member: discord.Member = None):
+    await interaction.response.send_message(embed=_rank_embed(member or interaction.user))
+
+
+@tree.command(name="leaderboard", description="Lihat top 10 member paling aktif", guild=discord.Object(id=GUILD_ID))
+async def slash_leaderboard(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=_leaderboard_embed(interaction.guild))
+
+
+# --- Mod-Log Helpers ------------------------------------------------------
+async def _send_modlog(guild, title, description, colour=BLURPLE):
+    ch = guild.get_channel(MODLOG_CHANNEL)
+    if not ch:
+        return
+    e = discord.Embed(title=title, description=description[:2000], colour=colour)
+    e.set_footer(text=time.strftime("%d %b %Y %H:%M"))
+    try:
+        await ch.send(embed=e)
+    except Exception:
+        pass
+
+
+@client.event
+async def on_member_remove(member):
+    if member.guild.id != GUILD_ID or member.bot:
+        return
+    await _send_modlog(member.guild, "📤 Member Keluar", f"{member.mention} (`{member.name}`)", RED)
+
+
+@client.event
+async def on_message_delete(msg):
+    if not msg.guild or msg.guild.id != GUILD_ID or msg.author.bot:
+        return
+    content = msg.content[:500] if msg.content else "_(tanpa teks / lampiran)_"
+    await _send_modlog(
+        msg.guild,
+        "🗑️ Pesan Dihapus",
+        f"**Pengirim:** {msg.author.mention} di {msg.channel.mention}\n**Isi:** {content}",
+        RED,
+    )
+
+
+@client.event
+async def on_message_edit(before, after):
+    if not after.guild or after.guild.id != GUILD_ID or after.author.bot:
+        return
+    if before.content == after.content:
+        return
+    await _send_modlog(
+        after.guild,
+        "✏️ Pesan Diedit",
+        f"**Pengirim:** {after.author.mention} di {after.channel.mention}\n"
+        f"**Sebelum:** {before.content[:300]}\n**Sesudah:** {after.content[:300]}",
+        GOLD,
+    )
 
 
 @client.event
@@ -696,285 +923,6 @@ async def on_voice_state_update(member, before, after):
             await before.channel.delete(reason="Temp voice kosong")
         except Exception:
             pass
-    vc = member.guild.voice_client
-    if vc and vc.channel and all(m.bot for m in vc.channel.members):
-        try:
-            vc.stop()
-            await vc.disconnect()
-        except Exception:
-            pass
-
-
-# --- Lofi Radio & Search-by-Title Music Player -----------------------------
-LOFI_STATIONS = [
-    ("lofi", "☕ Lofi Beats Radio", "https://play.streamafrica.net/lofiradio"),
-    ("chillsynth", "🌃 Nightride Chillsynth", "https://stream.nightride.fm/chillsynth.mp3"),
-    ("groove", "🌿 SomaFM Groove Salad", "https://ice2.somafm.com/groovesalad-128-mp3"),
-    ("lush", "🌙 SomaFM Lush", "https://ice2.somafm.com/lush-128-mp3"),
-]
-LOFI_STATE = {"idx": 0}
-MUSIC_QUEUE = []  # list of {"title": str, "url": str, "webpage": str, "requester": str}
-NOW_PLAYING = {"track": None}
-FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-
-
-def _search_track(query):
-    import yt_dlp
-    opts = {
-        "format": "bestaudio[protocol^=http][ext!=m3u8]/bestaudio/best",
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "default_search": "ytsearch1",
-    }
-    candidates = [query] if query.startswith(("http://", "https://")) else [f"ytsearch1:{query}", f"scsearch1:{query}"]
-    last_err = None
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        for target in candidates:
-            try:
-                info = ydl.extract_info(target, download=False)
-                if "entries" in info:
-                    entries = [e for e in (info.get("entries") or []) if e]
-                    if not entries:
-                        continue
-                    info = entries[0]
-                stream_url = info.get("url")
-                if not stream_url:
-                    continue
-                return {
-                    "title": info.get("title") or query,
-                    "url": stream_url,
-                    "webpage": info.get("webpage_url") or "",
-                    "headers": info.get("http_headers") or {},
-                }
-            except Exception as exc:
-                last_err = exc
-    raise RuntimeError(f"Lagu tidak ditemukan ({last_err or 'kosong'})")
-
-
-def _ensure_opus():
-    if not discord.opus.is_loaded():
-        for name in ("libopus.so.0", "libopus.so", "opus"):
-            try:
-                discord.opus.load_opus(name)
-                break
-            except Exception:
-                continue
-
-
-def _make_audio_source(url, headers=None):
-    _ensure_opus()
-    is_hls = ".m3u8" in url
-    before = [] if is_hls else [FFMPEG_BEFORE]
-    if headers:
-        hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items() if k.lower() in ("user-agent", "referer"))
-        if hdr:
-            before.append(f'-headers "{hdr}"')
-    raw = discord.FFmpegPCMAudio(url, before_options=" ".join(before) or None, options="-vn")
-    return discord.PCMVolumeTransformer(raw, volume=1.0)
-
-
-def _play_next_in_queue(guild, text_channel=None):
-    vc = guild.voice_client
-    if not vc or not vc.is_connected():
-        MUSIC_QUEUE.clear()
-        NOW_PLAYING["track"] = None
-        return
-    if not MUSIC_QUEUE:
-        NOW_PLAYING["track"] = None
-        return
-    track = MUSIC_QUEUE.pop(0)
-    NOW_PLAYING["track"] = track
-    source = _make_audio_source(track["url"], track.get("headers"))
-
-    def _after(err):
-        if err:
-            log("music stream err:", err)
-        fut = asyncio.run_coroutine_threadsafe(_on_track_end(guild, text_channel, err), client.loop)
-        try:
-            fut.result()
-        except Exception:
-            pass
-
-    vc.play(source, after=_after)
-
-
-async def _on_track_end(guild, text_channel, err=None):
-    if err and text_channel:
-        await text_channel.send(f"⚠️ Error audio stream: `{str(err)[:160]}`")
-    if MUSIC_QUEUE:
-        _play_next_in_queue(guild, text_channel)
-        t = NOW_PLAYING["track"]
-        if text_channel and t:
-            await text_channel.send(embed=_music_embed(t, guild.voice_client.channel.name), view=LofiView())
-    else:
-        NOW_PLAYING["track"] = None
-
-
-def _play_station(vc, idx):
-    MUSIC_QUEUE.clear()
-    idx = idx % len(LOFI_STATIONS)
-    LOFI_STATE["idx"] = idx
-    _key, title, url = LOFI_STATIONS[idx]
-    NOW_PLAYING["track"] = {"title": title, "url": url, "webpage": "", "requester": "Radio 24/7"}
-    if vc.is_playing() or vc.is_paused():
-        vc.stop()
-    source = _make_audio_source(url)
-    vc.play(source, after=lambda err: log("lofi stream end:", err) if err else None)
-    return title
-
-
-def _music_embed(track, channel_name):
-    title = track["title"]
-    link = f"[{title}]({track['webpage']})" if track.get("webpage") else f"**{title}**"
-    q_info = f"\nAntrian berikutnya: **{len(MUSIC_QUEUE)}** lagu" if MUSIC_QUEUE else ""
-    e = discord.Embed(
-        title="🎵 ╎ Sedang Diputar",
-        description=f"{link}\nVoice: **{channel_name}**{q_info}",
-        colour=0x9B59B6,
-    )
-    e.set_footer(text=f"Diminta oleh {track.get('requester', 'member')} • !play <judul> | !skip | !stop")
-    return e
-
-
-def _lofi_embed(title, channel_name):
-    e = discord.Embed(
-        title="🎧 ╎ Lofi Radio 24/7",
-        description=f"Sedang memutar **{title}** di **{channel_name}**\n"
-                    f"Perintah: `!lofi` • `!lofi next` • `!play <judul>` • `!stop`",
-        colour=0x9B59B6,
-    )
-    e.set_footer(text="Otomatis keluar jika voice kosong")
-    return e
-
-
-class LofiView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Skip / Ganti", emoji="⏭️", style=discord.ButtonStyle.primary, custom_id="lofi_next")
-    async def next_btn(self, interaction, _b):
-        vc = interaction.guild.voice_client
-        if not vc or not vc.is_connected():
-            await interaction.response.send_message("🔇 Bot tidak sedang di voice channel.", ephemeral=True)
-            return
-        if MUSIC_QUEUE:
-            vc.stop()
-            await interaction.response.send_message("⏭️ Lagu di-skip!", ephemeral=True)
-            return
-        title = _play_station(vc, LOFI_STATE["idx"] + 1)
-        await interaction.response.edit_message(embed=_lofi_embed(title, vc.channel.name), view=self)
-
-    @discord.ui.button(label="Stop", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="lofi_stop")
-    async def stop_btn(self, interaction, _b):
-        MUSIC_QUEUE.clear()
-        NOW_PLAYING["track"] = None
-        vc = interaction.guild.voice_client
-        if vc:
-            vc.stop()
-            await vc.disconnect()
-        await interaction.response.edit_message(
-            embed=discord.Embed(title="⏹️ ╎ Musik Dimatikan", colour=0x99AAB5), view=None
-        )
-
-
-async def _ensure_voice(msg):
-    if not msg.author.voice or not msg.author.voice.channel:
-        await msg.reply("🎧 Masuk ke voice channel dulu!", mention_author=False)
-        return None
-    voice_ch = msg.author.voice.channel
-    vc = msg.guild.voice_client
-    if vc and vc.is_connected():
-        if vc.channel.id != voice_ch.id:
-            await vc.move_to(voice_ch)
-            await asyncio.sleep(0.4)
-        return vc
-    vc = await voice_ch.connect(timeout=30, self_deaf=True)
-    await asyncio.sleep(0.5)
-    return vc
-
-
-async def handle_music_command(msg, text):
-    parts = text.split(maxsplit=1)
-    cmd = parts[0].lower()
-    arg = parts[1].strip() if len(parts) > 1 else ""
-    guild = msg.guild
-    vc = guild.voice_client
-
-    if cmd in ("!stop", "!leave") or (cmd == "!lofi" and arg.lower() in ("stop", "leave", "keluar", "mati")):
-        MUSIC_QUEUE.clear()
-        NOW_PLAYING["track"] = None
-        if not vc:
-            await msg.reply("🔇 Bot tidak sedang di voice channel.", mention_author=False)
-            return
-        vc.stop()
-        await vc.disconnect()
-        await msg.reply("⏹️ Musik dimatikan & keluar dari voice.", mention_author=False)
-        return
-
-    if cmd in ("!queue", "!q"):
-        cur = NOW_PLAYING.get("track")
-        lines = [f"**Sedang diputar:** {cur['title']}" if cur else "**Sedang diputar:** tidak ada"]
-        for i, t in enumerate(MUSIC_QUEUE[:10], 1):
-            lines.append(f"`{i}.` {t['title']}")
-        await msg.reply(embed=discord.Embed(title="🎶 Antrian Lagu", description="\n".join(lines), colour=0x9B59B6),
-                        mention_author=False)
-        return
-
-    if cmd in ("!skip", "!next") or (cmd == "!lofi" and arg.lower() in ("next", "skip")):
-        if not vc or not vc.is_connected():
-            await msg.reply("🔇 Bot tidak sedang di voice.", mention_author=False)
-            return
-        if MUSIC_QUEUE:
-            vc.stop()
-            await msg.reply("⏭️ Skip ke lagu berikutnya.", mention_author=False)
-        else:
-            title = _play_station(vc, LOFI_STATE["idx"] + 1)
-            await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
-        return
-
-    if cmd == "!lofi" and arg.lower() in ("list", "stations", "stasiun"):
-        lines = "\n".join(f"• `{k}` — {t}" for k, t, _ in LOFI_STATIONS)
-        await msg.reply(embed=discord.Embed(title="📻 Daftar Stasiun Lofi", description=lines, colour=0x9B59B6),
-                        mention_author=False)
-        return
-
-    # !lofi with no arg or known station key -> 24/7 radio
-    station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
-    if cmd == "!lofi" and (not arg or arg.lower() in station_keys):
-        import shutil
-        vc = await _ensure_voice(msg)
-        if not vc:
-            return
-        idx = station_keys.get(arg.lower(), LOFI_STATE["idx"])
-        title = _play_station(vc, idx)
-        await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
-        await asyncio.sleep(2.5)
-        if vc.is_connected() and not vc.is_playing():
-            await msg.channel.send(
-                f"⚠️ Stream `{title}` langsung berhenti (`opus={discord.opus.is_loaded()}`, `ffmpeg={bool(shutil.which('ffmpeg'))}`). "
-                f"Coba `!lofi next` untuk ganti stasiun."
-            )
-        return
-
-    # Search & play by song title (!play <judul>, !p <judul>, or !lofi <judul>)
-    query = arg
-    if not query:
-        await msg.reply("🔎 Tulis judul lagunya, contoh: `!play lofi hip hop` atau `!play judul lagu`", mention_author=False)
-        return
-    vc = await _ensure_voice(msg)
-    if not vc:
-        return
-    async with msg.channel.typing():
-        track = await asyncio.to_thread(_search_track, query)
-    track["requester"] = msg.author.display_name
-    if vc.is_playing() or vc.is_paused():
-        MUSIC_QUEUE.append(track)
-        await msg.reply(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**", mention_author=False)
-    else:
-        MUSIC_QUEUE.append(track)
-        _play_next_in_queue(guild, msg.channel)
-        await msg.reply(embed=_music_embed(track, vc.channel.name), view=LofiView(), mention_author=False)
 
 
 async def background_qa_and_autorole():
@@ -1011,9 +959,15 @@ def start_health_server():
 @client.event
 async def on_ready():
     client.add_view(RolePickerView())
-    client.add_view(LofiView())
+    client.add_view(SuggestionView())
+    client.add_view(TicketLauncherView())
+    client.add_view(TicketCloseView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
+        try:
+            await tree.sync(guild=discord.Object(id=GUILD_ID))
+        except Exception as exc:
+            log("tree sync error:", exc)
         client.loop.create_task(background_qa_and_autorole())
     log(f"online sebagai {client.user} — melayani owner {OWNER_ID} di #commands")
 
@@ -1022,6 +976,7 @@ async def on_ready():
 async def on_member_join(member):
     if member.guild.id != GUILD_ID or member.bot:
         return
+    await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`)", GREEN)
     ch = member.guild.get_channel(WELCOME_CHANNEL)
     if ch:
         e = discord.Embed(
@@ -1041,34 +996,19 @@ async def on_member_join(member):
 async def on_message(msg):
     if msg.author.bot or not msg.guild or msg.guild.id != GUILD_ID:
         return
-    if msg.channel.id == IDEAS_CHANNEL and msg.content.strip():
+    new_lvl = _award_xp(msg.author.id)
+    if new_lvl is not None:
         try:
-            await msg.add_reaction("👍")
-            await msg.add_reaction("👎")
+            await msg.channel.send(f"🎉 Selamat {msg.author.mention}, kamu naik ke **Level {new_lvl}**!")
         except Exception:
             pass
     text = msg.content.strip()
     cmd_word = text.split(maxsplit=1)[0].lower() if text else ""
-    if cmd_word == "!vdebug":
-        import shutil
-        _ensure_opus()
-        vc = msg.guild.voice_client
-        info = [
-            f"opus_loaded: `{discord.opus.is_loaded()}`",
-            f"ffmpeg: `{shutil.which('ffmpeg')}`",
-            f"vc_connected: `{vc.is_connected() if vc else False}`",
-            f"vc_playing: `{vc.is_playing() if vc else False}`",
-            f"vc_channel: `{vc.channel.name if vc and vc.channel else None}`",
-            f"vc_latency: `{round(vc.latency * 1000)} ms` " if vc else "vc_latency: `-`",
-        ]
-        await msg.reply("\n".join(info), mention_author=False)
+    if cmd_word == "!rank":
+        await msg.reply(embed=_rank_embed(msg.author), mention_author=False)
         return
-    if cmd_word in ("!lofi", "!play", "!p", "!skip", "!next", "!queue", "!q", "!stop", "!leave"):
-        try:
-            await handle_music_command(msg, text)
-        except Exception as exc:
-            log("music error:", exc)
-            await msg.reply(f"❌ Gagal memutar musik: `{str(exc)[:200]}`", mention_author=False)
+    if cmd_word in ("!top", "!leaderboard", "!lb"):
+        await msg.reply(embed=_leaderboard_embed(msg.guild), mention_author=False)
         return
     if msg.author.id != OWNER_ID or msg.channel.id != COMMANDS_CHANNEL:
         return
@@ -1088,18 +1028,29 @@ async def on_message(msg):
     if low == "!panel-role":
         w = guild.get_channel(WELCOME_CHANNEL)
         e = discord.Embed(
-            title="🎭 ╎ PILIH ROLE KAMU SENDIRI",
-            description="Klik tombol di bawah untuk memasang atau melepas role spesial kamu secara otomatis!",
+            title="🎭 ╎ PILIH ROLE GAMING KAMU",
+            description="Klik tombol di bawah untuk memasang atau melepas role platform & LFG kamu!",
             colour=BLURPLE,
         )
-        e.add_field(name="💻 Developer", value="Akses `#💻╎dev-lab` & `#🐞╎bug-report`", inline=True)
-        e.add_field(name="🧪 QA Tester", value="Akses `#🐞╎bug-report` & lapor bug", inline=True)
-        e.add_field(name="🎨 Creator", value="Hak posting di `#🎨╎showcase`", inline=True)
-        e.add_field(name="🎮 Gamer", value="Akses penuh Voice, Stream & Soundboard", inline=True)
+        e.add_field(name="🖥️ Platform", value="PC • PlayStation • Xbox • Mobile • Switch", inline=False)
+        e.add_field(name="🔎 Komunitas", value="Looking for Group (cari teman mabar)", inline=False)
         e.set_footer(text="DEV Server • Self-Role Picker")
         await (w or msg.channel).send(embed=e, view=RolePickerView())
         if w and w.id != msg.channel.id:
             await msg.reply(f"✅ Panel pilih role dikirim ke {w.mention}.", mention_author=False)
+        return
+    if low == "!panel-ticket":
+        g = guild.get_channel(1572712078295437413) or msg.channel
+        e = discord.Embed(
+            title="🎫 ╎ BANTUAN & TICKET SUPPORT",
+            description="Butuh bantuan staff, lapor masalah, atau ada keperluan khusus?\n"
+                        "Klik tombol **🎫 Buka Ticket** di bawah untuk membuat channel privat dengan staff.",
+            colour=BLURPLE,
+        )
+        e.set_footer(text="DEV Server • Support Ticket")
+        await g.send(embed=e, view=TicketLauncherView())
+        if g.id != msg.channel.id:
+            await msg.reply(f"✅ Panel ticket dikirim ke {g.mention}.", mention_author=False)
         return
     if low == "!stats":
         g = guild
