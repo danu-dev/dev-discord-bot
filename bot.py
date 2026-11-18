@@ -752,7 +752,18 @@ def _search_track(query):
     raise RuntimeError(f"Lagu tidak ditemukan ({last_err or 'kosong'})")
 
 
+def _ensure_opus():
+    if not discord.opus.is_loaded():
+        for name in ("libopus.so.0", "libopus.so", "opus"):
+            try:
+                discord.opus.load_opus(name)
+                break
+            except Exception:
+                continue
+
+
 def _make_audio_source(url, headers=None):
+    _ensure_opus()
     is_hls = ".m3u8" in url
     before = [] if is_hls else [FFMPEG_BEFORE]
     if headers:
@@ -931,12 +942,19 @@ async def handle_music_command(msg, text):
     # !lofi with no arg or known station key -> 24/7 radio
     station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
     if cmd == "!lofi" and (not arg or arg.lower() in station_keys):
+        import shutil
         vc = await _ensure_voice(msg)
         if not vc:
             return
         idx = station_keys.get(arg.lower(), LOFI_STATE["idx"])
         title = _play_station(vc, idx)
         await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
+        await asyncio.sleep(2.5)
+        if vc.is_connected() and not vc.is_playing():
+            await msg.channel.send(
+                f"⚠️ Stream `{title}` langsung berhenti (`opus={discord.opus.is_loaded()}`, `ffmpeg={bool(shutil.which('ffmpeg'))}`). "
+                f"Coba `!lofi next` untuk ganti stasiun."
+            )
         return
 
     # Search & play by song title (!play <judul>, !p <judul>, or !lofi <judul>)
@@ -1031,6 +1049,20 @@ async def on_message(msg):
             pass
     text = msg.content.strip()
     cmd_word = text.split(maxsplit=1)[0].lower() if text else ""
+    if cmd_word == "!vdebug":
+        import shutil
+        _ensure_opus()
+        vc = msg.guild.voice_client
+        info = [
+            f"opus_loaded: `{discord.opus.is_loaded()}`",
+            f"ffmpeg: `{shutil.which('ffmpeg')}`",
+            f"vc_connected: `{vc.is_connected() if vc else False}`",
+            f"vc_playing: `{vc.is_playing() if vc else False}`",
+            f"vc_channel: `{vc.channel.name if vc and vc.channel else None}`",
+            f"vc_latency: `{round(vc.latency * 1000)} ms` " if vc else "vc_latency: `-`",
+        ]
+        await msg.reply("\n".join(info), mention_author=False)
+        return
     if cmd_word in ("!lofi", "!play", "!p", "!skip", "!next", "!queue", "!q", "!stop", "!leave"):
         try:
             await handle_music_command(msg, text)
