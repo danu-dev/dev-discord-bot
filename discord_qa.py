@@ -21,7 +21,7 @@ import urllib.request
 
 import os
 GUILD_ID = "1572541420298829834"
-QA_CHANNEL_ID = "1572560619113152563"  # #qa-report
+QA_CHANNEL_ID = "1572669204497301575"  # #qa-report
 TOKEN_FILE = "/root/.config/opencode/secrets/discord.token"
 API = "https://discord.com/api/v10"
 AUDIT_REASON = "QA check"
