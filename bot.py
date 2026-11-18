@@ -35,8 +35,11 @@ STATS_CHANNEL = 1572654530338889841
 WELCOME_CHANNEL = 1572549312880189461
 MEMBER_ROLE_ID = 1572549618057613332
 DISCORD_TOKEN_FILE = "/root/.config/opencode/secrets/discord.token"
+GEMINI_KEY_FILE = "/root/.config/opencode/secrets/gemini.key"
 GROQ_KEY_FILE = "/root/.config/opencode/secrets/groq.key"
 MEMORY_FILE = os.environ.get("MEMORY_FILE", "dev-ai-memory.json")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -51,8 +54,22 @@ def get_discord_token():
     return os.environ.get("DISCORD_TOKEN") or open(DISCORD_TOKEN_FILE, encoding="utf-8").read().strip()
 
 
+def _read_secret(env_names, file_path):
+    for name in env_names:
+        val = os.environ.get(name, "").strip()
+        if val:
+            return val
+    if os.path.exists(file_path):
+        return read(file_path)
+    return ""
+
+
+def get_gemini_key():
+    return _read_secret(("GEMINI_API_KEY", "GEMINI_KEY"), GEMINI_KEY_FILE)
+
+
 def get_groq_key():
-    return os.environ.get("GROQ_KEY") or open(GROQ_KEY_FILE, encoding="utf-8").read().strip()
+    return _read_secret(("GROQ_KEY", "GROQ_API_KEY"), GROQ_KEY_FILE)
 
 
 def read(path):
@@ -67,47 +84,42 @@ qa = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(qa)
 
 
-# --- Groq -----------------------------------------------------------------
-SYSTEM_PROMPT = """Kamu asisten setup & manajemen server Discord "DEV". Pemilik server menulis permintaan
-dalam bahasa Indonesia santai. Ubah jadi rencana aksi JSON.
+# --- AI (Gemini primary + token-saving + Groq fallback) ---------------------
+SYSTEM_PROMPT = """Asisten manajemen server Discord "DEV" untuk owner. Balas HANYA JSON: {"reply":str,"actions":[...]}.
 
-Balas HANYA JSON: {"reply": "<penjelasan singkat bahasa Indonesia>", "actions": [ ... ]}
+Aksi (pakai nama persis dari state server; maks 15):
+- create_category: name
+- create_text_channel: name, category|null, topic|null, read_only(bool)
+- create_voice_channel: name, category|null, user_limit(int|null)
+- rename_channel: channel, new_name
+- move_channel: channel, category
+- delete_channel: channel
+- set_topic: channel, topic
+- set_slowmode: channel, seconds(int)
+- lock_channel / unlock_channel: channel
+- hide_channel: channel, visible_to_roles([str])
+- create_role: name, color(#RRGGBB), hoist(bool), mentionable(bool)
+- edit_role: role, new_name|null, color|null, hoist(bool|null)
+- delete_role: role
+- give_role / remove_role: member, role
+- edit_server: name|null, description|null
+- send_embed: channel, title, description, color(#RRGGBB)
+- purge_messages: channel, limit(int)
 
-Aksi yang tersedia (pakai nama channel/kategori/role/member persis seperti di daftar server):
-- {"type":"create_category","name":str}
-- {"type":"create_text_channel","name":str,"category":str|null,"topic":str|null,"read_only":bool}
-- {"type":"create_voice_channel","name":str,"category":str|null,"user_limit":int|null}
-- {"type":"rename_channel","channel":str,"new_name":str}
-- {"type":"move_channel","channel":str,"category":str}
-- {"type":"delete_channel","channel":str}
-- {"type":"set_topic","channel":str,"topic":str}
-- {"type":"set_slowmode","channel":str,"seconds":int}
-- {"type":"lock_channel","channel":str}      (member hanya bisa baca)
-- {"type":"unlock_channel","channel":str}
-- {"type":"hide_channel","channel":str,"visible_to_roles":[str]}  (cuma role itu yang bisa lihat)
-- {"type":"create_role","name":str,"color":"#RRGGBB","hoist":bool,"mentionable":bool}
-- {"type":"edit_role","role":str,"new_name":str|null,"color":"#RRGGBB"|null,"hoist":bool|null}
-- {"type":"delete_role","role":str}
-- {"type":"give_role","member":str,"role":str}
-- {"type":"remove_role","member":str,"role":str}
-- {"type":"edit_server","name":str|null,"description":str|null}
-- {"type":"send_embed","channel":str,"title":str,"description":str,"color":"#RRGGBB"}
-- {"type":"purge_messages","channel":str,"limit":int}
-
-Aturan:
-- Semua aksi di atas aman dijalankan karena owner harus menekan tombol ✅ terlebih dahulu.
-- Kamu punya ingatan percakapan sebelumnya, gunakan konteks itu untuk memahami kata rujukan ("tadi", "yang barusan", "itu", dll).
-- Kalau permintaan cuma ngobrol/pertanyaan, jawab di "reply" dan actions [].
-- Nama text channel huruf kecil pakai tanda hubung. Boleh pakai emoji gaya "💬╎nama".
-- Maksimal 15 aksi.
-"""
+Fitur bot yang BENAR-BENAR ADA: !help, !qa, !qa test, !stats, !panel-role, !reset, auto-role Member, welcome embed, temp voice "➕ ╎ Buat Room", auto-react 👍👎 di #ideas-hub.
+Aturan ketat:
+1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru (mis. sistem /suggestion, ticket, leveling), jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
+2. Jika hanya ngobrol/tanya/komplain, jawab ringkas & jelas di "reply" dengan actions [].
+3. "reply" bahasa Indonesia santai, padat, langsung ke inti (hemat kata).
+4. Nama text channel huruf kecil pakai "-" (boleh prefix emoji seperti "💬╎nama").
+5. Gunakan konteks chat sebelumnya untuk kata rujukan ("tadi", "itu", "hapus")."""
 
 CHAT_HISTORY = []
-MAX_HISTORY = 12
+MAX_HISTORY = 12  # 6 turns (user + compact assistant summary)
 
 if os.path.exists(MEMORY_FILE):
     try:
-        CHAT_HISTORY = json.loads(read(MEMORY_FILE))[-MAX_HISTORY * 2:]
+        CHAT_HISTORY = json.loads(read(MEMORY_FILE))[-MAX_HISTORY:]
     except Exception:
         CHAT_HISTORY = []
 
@@ -115,15 +127,91 @@ if os.path.exists(MEMORY_FILE):
 def _save_memory():
     try:
         with open(MEMORY_FILE, "w", encoding="utf-8") as fh:
-            json.dump(CHAT_HISTORY[-MAX_HISTORY * 2:], fh, ensure_ascii=False)
+            json.dump(CHAT_HISTORY[-MAX_HISTORY:], fh, ensure_ascii=False)
     except Exception:
         pass
 
 
-def groq_plan(request_text, server_summary, remember=True):
+def _compact_assistant_memory(plan):
+    acts = ", ".join(a.get("type", "?") for a in plan.get("actions") or [])
+    reply = (plan.get("reply") or "").strip()[:240]
+    return f"{reply} [aksi: {acts}]".strip() if acts else reply
+
+
+def _record_turn(request_text, plan):
+    CHAT_HISTORY.append({"role": "user", "content": request_text[:500]})
+    CHAT_HISTORY.append({"role": "assistant", "content": _compact_assistant_memory(plan)})
+    if len(CHAT_HISTORY) > MAX_HISTORY:
+        del CHAT_HISTORY[:-MAX_HISTORY]
+    _save_memory()
+
+
+def _parse_plan(raw_content):
+    text = (raw_content or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").lstrip("json").strip()
+    plan = json.loads(text)
+    plan.setdefault("reply", "")
+    actions = plan.get("actions") or []
+    plan["actions"] = [a for a in actions if isinstance(a, dict) and a.get("type") in ACTIONS][:15]
+    return plan
+
+
+def gemini_plan(request_text, summary, remember=True):
+    key = get_gemini_key()
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY belum diset")
+    contents = []
+    if remember:
+        for m in CHAT_HISTORY[-MAX_HISTORY:]:
+            role = "model" if m["role"] == "assistant" else "user"
+            contents.append({"role": role, "parts": [{"text": m["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": f"State server:\n{summary}\n\nPermintaan: {request_text}"}]})
+    gen_cfg = {
+        "temperature": 0.2,
+        "maxOutputTokens": 900,
+        "responseMimeType": "application/json",
+    }
+    if "2.5" in GEMINI_MODEL:
+        gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
+    body = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": contents,
+        "generationConfig": gen_cfg,
+    }
+    url = GEMINI_URL.format(model=GEMINI_MODEL) + f"?key={key}"
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "dev-ai-bot/2.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Gemini HTTP {exc.code}: {exc.read().decode(errors='replace')[:200]}")
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini tidak mengembalikan kandidat jawaban")
+    parts = candidates[0].get("content", {}).get("parts") or []
+    raw_content = "".join(p.get("text", "") for p in parts)
+    plan = _parse_plan(raw_content)
+    usage = data.get("usageMetadata") or {}
+    meta = {
+        "provider": f"Gemini ({GEMINI_MODEL})",
+        "tokens": usage.get("totalTokenCount"),
+    }
+    if remember:
+        _record_turn(request_text, plan)
+    return plan, meta
+
+
+def groq_plan(request_text, summary, remember=True):
+    key = get_groq_key()
+    if not key:
+        raise RuntimeError("GROQ_KEY belum diset")
     msgs = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": "Kondisi server sekarang:\n" + server_summary},
+        {"role": "system", "content": "State server:\n" + summary},
     ]
     if remember:
         msgs.extend(CHAT_HISTORY[-MAX_HISTORY:])
@@ -131,30 +219,36 @@ def groq_plan(request_text, server_summary, remember=True):
     body = {
         "model": GROQ_MODEL,
         "temperature": 0.2,
+        "max_tokens": 900,
         "response_format": {"type": "json_object"},
         "messages": msgs,
     }
     req = urllib.request.Request(
         GROQ_URL, data=json.dumps(body).encode(), method="POST",
-        headers={"Authorization": "Bearer " + get_groq_key(),
-                 "Content-Type": "application/json", "User-Agent": "dev-ai-bot/1.0"})
+        headers={"Authorization": "Bearer " + key,
+                 "Content-Type": "application/json", "User-Agent": "dev-ai-bot/2.0"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Groq HTTP {exc.code}: {exc.read().decode(errors='replace')[:200]}")
-    raw_content = data["choices"][0]["message"]["content"]
-    plan = json.loads(raw_content)
-    plan.setdefault("reply", "")
-    actions = plan.get("actions") or []
-    plan["actions"] = [a for a in actions if isinstance(a, dict) and a.get("type") in ACTIONS][:15]
+    plan = _parse_plan(data["choices"][0]["message"]["content"])
+    usage = data.get("usage") or {}
+    meta = {
+        "provider": f"Groq ({GROQ_MODEL})",
+        "tokens": usage.get("total_tokens"),
+    }
     if remember:
-        CHAT_HISTORY.append({"role": "user", "content": request_text})
-        CHAT_HISTORY.append({"role": "assistant", "content": raw_content})
-        if len(CHAT_HISTORY) > MAX_HISTORY * 2:
-            del CHAT_HISTORY[:-MAX_HISTORY * 2]
-        _save_memory()
-    return plan
+        _record_turn(request_text, plan)
+    return plan, meta
+
+
+def ai_plan(request_text, summary, remember=True):
+    if get_gemini_key():
+        return gemini_plan(request_text, summary, remember=remember)
+    if get_groq_key():
+        return groq_plan(request_text, summary, remember=remember)
+    raise RuntimeError("Tidak ada API key AI (GEMINI_API_KEY / GROQ_KEY)")
 
 
 # --- helpers --------------------------------------------------------------
@@ -212,15 +306,18 @@ def find_member(guild, name):
     return None
 
 
-def server_summary(guild):
-    lines = [f"Server: {guild.name}", "Kategori & channel:"]
+def server_summary(guild, query=""):
+    lines = [f"Server:{guild.name}"]
     for cat, chans in guild.by_category():
-        lines.append(f"- [{cat.name if cat else 'tanpa kategori'}] " +
-                     ", ".join(("#" if isinstance(c, discord.TextChannel) else "🔊") + c.name for c in chans))
-    lines.append("Role: " + ", ".join(r.name for r in reversed(guild.roles)))
-    members = [m.name for m in guild.members if not m.bot]
-    if members:
-        lines.append("Member: " + ", ".join(members[:30]))
+        ch_str = ",".join(("#" if isinstance(c, discord.TextChannel) else "🔊") + c.name for c in chans)
+        lines.append(f"[{cat.name if cat else 'none'}] {ch_str}")
+    roles = [r.name for r in reversed(guild.roles) if r.name != "@everyone"]
+    lines.append("Roles:" + ",".join(roles))
+    q = (query or "").lower()
+    if any(k in q for k in ("role", "kasih", "beri", "cabut", "member", "vip", "@", "siapa")):
+        members = [m.name for m in guild.members if not m.bot]
+        if members:
+            lines.append("Members:" + ",".join(members[:25]))
     return "\n".join(lines)
 
 
@@ -245,7 +342,7 @@ def describe(a):
         "give_role": lambda: f"➕ Beri role **{g('role')}** ke **{g('member')}**",
         "remove_role": lambda: f"➖ Cabut role **{g('role')}** dari **{g('member')}**",
         "edit_server": lambda: f"🏠 Ubah info server ({g('name') or 'nama tetap'})",
-        "send_embed": lambda: f"📨 Kirim embed **{g('title')}** ke #{g('channel')}",
+        "send_embed": lambda: f"📨 Kirim embed **{g('title')}** ke #{g('channel')}" + (f" (`{(g('description') or '')[:60]}…`)" if g('description') else ""),
         "purge_messages": lambda: f"🧹 Hapus **{g('limit')}** pesan terakhir di #{g('channel')}",
     }[t]()
 
@@ -501,10 +598,11 @@ async def live_tests(guild):
         out.append(("member-izin-dasar", not missing, "lengkap" if not missing else "tidak bisa: " + ", ".join(missing)))
     out.append(("latency", client.latency < 1.5, f"{client.latency * 1000:.0f} ms"))
     try:
-        await asyncio.to_thread(groq_plan, "halo", "-", False)
-        out.append(("groq-ai", True, f"{GROQ_MODEL} merespons"))
+        _, meta = await asyncio.to_thread(ai_plan, "halo", "-", False)
+        tok = f" ({meta['tokens']} tok)" if meta.get("tokens") else ""
+        out.append(("ai-brain", True, f"{meta['provider']} merespons{tok}"))
     except Exception as exc:
-        out.append(("groq-ai", False, str(exc)[:200]))
+        out.append(("ai-brain", False, str(exc)[:200]))
     return out
 
 
@@ -529,7 +627,7 @@ HELP = discord.Embed(
 HELP.add_field(name="!qa", value="Cek struktur server", inline=True)
 HELP.add_field(name="!qa test", value="Tes langsung", inline=True)
 HELP.add_field(name="!reset", value="Hapus ingatan chat AI", inline=True)
-HELP.set_footer(text=f"Otak AI: Groq • {GROQ_MODEL}")
+HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
 
 
 # --- Extra Features (Role Picker, Temp Voice, Auto-Ideas, Live Stats) -----
@@ -738,20 +836,23 @@ async def on_message(msg):
 
     async with msg.channel.typing():
         try:
-            plan = await asyncio.to_thread(groq_plan, text, server_summary(guild))
+            plan, meta = await asyncio.to_thread(ai_plan, text, server_summary(guild, text))
         except Exception as exc:
-            log("groq error:", exc)
+            log("ai error:", exc)
             await msg.reply(embed=discord.Embed(title="AI error", description=str(exc)[:1500], colour=RED),
                             mention_author=False)
             return
+    tok_info = f" • {meta['tokens']} tok" if meta.get("tokens") else ""
+    footer_ai = f"{meta['provider']}{tok_info}"
     e = discord.Embed(description=plan["reply"][:3000] or "​", colour=GOLD if plan["actions"] else BLURPLE)
     if not plan["actions"]:
+        e.set_footer(text=footer_ai)
         await msg.reply(embed=e, mention_author=False)
         return
     e.title = "📋 Rencana — tekan ✅ untuk menjalankan"
     e.add_field(name=f"{len(plan['actions'])} aksi", value="\n".join(describe(a) for a in plan["actions"])[:1024],
                 inline=False)
-    e.set_footer(text="Berlaku 5 menit • hanya owner yang bisa menekan tombol")
+    e.set_footer(text=f"{footer_ai} • Berlaku 5 menit")
     await msg.reply(embed=e, view=PlanView(guild, plan["actions"]), mention_author=False)
 
 
