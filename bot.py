@@ -13,9 +13,11 @@ available at all.
 """
 
 import asyncio
+import collections
 import http.server
 import importlib.util
 import json
+import logging
 import os
 import sys
 import threading
@@ -948,6 +950,29 @@ LOFI_STATE = {"idx": 0}
 MUSIC_QUEUE = []
 NOW_PLAYING = {"track": None}
 FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+VOICE_LOGS = collections.deque(maxlen=25)
+
+
+class _VoiceLogHandler(logging.Handler):
+    def emit(self, record):
+        msg = self.format(record)
+        low = msg.lower()
+        if any(k in low for k in ("dave", "mls", "transition", "epoch", "encrypt", "voice", "error", "exception", "fail", "close")):
+            VOICE_LOGS.append(msg[:220])
+
+
+def _setup_voice_logging():
+    h = _VoiceLogHandler()
+    h.setLevel(logging.DEBUG)
+    h.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    for name in ("discord.gateway", "discord.voice_state", "discord.voice_client"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.DEBUG)
+        if not any(isinstance(x, _VoiceLogHandler) for x in lg.handlers):
+            lg.addHandler(h)
+
+
+_setup_voice_logging()
 
 
 def _search_track(query):
@@ -1332,12 +1357,14 @@ async def on_message(msg):
             has_davey = getattr(davey, "__version__", "installed")
         except Exception:
             has_davey = False
+        ds = getattr(conn, "dave_session", None) if conn else None
         info = [
             f"discord.py: `{discord.__version__}`",
             f"opus_loaded: `{discord.opus.is_loaded()}`",
             f"ffmpeg: `{shutil.which('ffmpeg')}`",
             f"davey: `{has_davey}`",
             f"dave_version: `{getattr(conn, 'dave_protocol_version', '-') if conn else '-'}`",
+            f"dave_session: `{ds is not None}` | ready: `{getattr(ds, 'ready', '-') if ds else '-'}` | epoch: `{getattr(ds, 'epoch', '-') if ds else '-'}`",
             f"can_encrypt: `{getattr(conn, 'can_encrypt', '-') if conn else '-'}`",
             f"vc_connected: `{vc.is_connected() if vc else False}`",
             f"vc_playing: `{vc.is_playing() if vc else False}`",
@@ -1345,6 +1372,8 @@ async def on_message(msg):
             f"vc_latency: `{round(vc.latency * 1000)} ms`" if vc else "vc_latency: `-`",
             f"server_muted: `{me_v.mute if me_v else '-'}` | suppressed: `{me_v.suppress if me_v else '-'}`",
         ]
+        if VOICE_LOGS:
+            info.append("```text\n" + "\n".join(list(VOICE_LOGS)[-12:]) + "\n```")
         await msg.reply("\n".join(info), mention_author=False)
         return
     if cmd_word in ("!lofi", "!play", "!p", "!skip", "!next", "!queue", "!q", "!stop", "!leave"):
