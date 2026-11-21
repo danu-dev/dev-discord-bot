@@ -35,6 +35,7 @@ jobs:
             dev-ai-memory.json
             dev-xp-data.json
             dev-economy-data.json
+            dev-verify-config.json
           key: bot-state-${{ github.run_id }}
           restore-keys: |
             bot-state-
@@ -61,4 +62,5 @@ jobs:
             dev-ai-memory.json
             dev-xp-data.json
             dev-economy-data.json
+            dev-verify-config.json
           key: bot-state-${{ github.run_id }}

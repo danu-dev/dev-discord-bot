@@ -153,20 +153,21 @@ class VerifyView(discord.ui.View):
 
     @discord.ui.button(label="Saya Setuju Rules & Verifikasi", style=discord.ButtonStyle.success, emoji="✅", custom_id="verify_member_btn")
     async def verify_btn(self, interaction: discord.Interaction, _btn: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         role = interaction.guild.get_role(MEMBER_ROLE_ID)
         if not role:
-            await interaction.response.send_message("❌ Role Member tidak ditemukan. Hubungi Staff.", ephemeral=True)
+            await interaction.followup.send("❌ Role Member tidak ditemukan. Hubungi Staff.", ephemeral=True)
             return
         if role in interaction.user.roles:
-            await interaction.response.send_message(f"ℹ️ Kamu sudah terverifikasi dan memiliki role {role.mention}.", ephemeral=True)
+            await interaction.followup.send(f"ℹ️ Kamu sudah terverifikasi dan memiliki role {role.mention}.", ephemeral=True)
             return
         try:
             await interaction.user.add_roles(role, reason="Verifikasi Member via tombol rules")
         except Exception as exc:
-            await interaction.response.send_message(f"❌ Gagal memberikan role: {exc}", ephemeral=True)
+            await interaction.followup.send(f"❌ Gagal memberikan role: {exc}", ephemeral=True)
             return
         await _send_modlog(interaction.guild, "✅ Member Terverifikasi", f"{interaction.user.mention} (`{interaction.user.name}`)", GREEN)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Verifikasi berhasil! Role {role.mention} sudah diberikan. Selamat bersenang-senang di **{interaction.guild.name}**!",
             ephemeral=True,
         )
@@ -195,11 +196,16 @@ async def slash_panel_verify(interaction: discord.Interaction, channel: discord.
     if not _has_mod_perm(interaction.user, "manage_guild"):
         await interaction.response.send_message("❌ Kamu tidak punya izin mengirim panel verifikasi.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
     ch = channel or interaction.guild.get_channel(RULES_CHANNEL_ID) or interaction.channel
+    try:
+        await ch.send(embed=verify_panel_embed(interaction.guild), view=VerifyView())
+    except Exception as exc:
+        await interaction.followup.send(f"❌ Gagal mengirim panel ke {ch.mention}: `{exc}`", ephemeral=True)
+        return
     VERIFY_CONFIG["enabled"] = True
     _save_verify_config()
-    await ch.send(embed=verify_panel_embed(interaction.guild), view=VerifyView())
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Panel verifikasi dikirim ke {ch.mention} dan mode verifikasi tombol sekarang **AKTIF**.",
         ephemeral=True,
     )
