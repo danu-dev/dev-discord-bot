@@ -161,7 +161,13 @@ def find_member(guild, name):
 
 
 def _has_mod_perm(member, perm_name):
-    return member.id == OWNER_ID or getattr(member.guild_permissions, perm_name, False) or member.guild_permissions.administrator
+    has_mod_role = any(r.id == MOD_ROLE_ID for r in getattr(member, "roles", ()))
+    return (
+        member.id == OWNER_ID
+        or has_mod_role
+        or getattr(member.guild_permissions, perm_name, False)
+        or member.guild_permissions.administrator
+    )
 
 
 def _parse_target_id(raw):

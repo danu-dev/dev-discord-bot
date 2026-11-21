@@ -29,7 +29,8 @@ def _help_embed(member):
         inline=False,
     )
     perms = member.guild_permissions
-    if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
+    has_mod_role = any(r.id == MOD_ROLE_ID for r in getattr(member, "roles", ()))
+    if member.id == OWNER_ID or has_mod_role or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
             value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/giveaway` • `/panel-verify`\n"
