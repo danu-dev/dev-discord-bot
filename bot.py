@@ -664,7 +664,7 @@ def _help_embed(member):
     if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
-            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/buatlist`\n"
+            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/buat`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
@@ -1501,47 +1501,108 @@ class CustomListModal(discord.ui.Modal, title="Buat Channel & Pesan List"):
         )
 
 
-@tree.command(name="buatlist", description="Buat channel baru + kirim pesan list custom (seperti list loadstring)", guild=discord.Object(id=GUILD_ID))
-@discord.app_commands.describe(
-    nama_channel="Nama channel baru (contoh: │ 🐱-loadstring-adopt-me)",
-    kategori="Kategori tempat channel baru dibuat (opsional)",
-    channel_tujuan="Kirim ke channel yang sudah ada tanpa bikin baru (opsional)",
-    read_only="Kunci channel agar member hanya bisa baca (default: Ya)",
-    mention_role="Role yang ingin di-mention di pesan (opsional)",
-    format_kode="Format tampilan kode/isi item",
-)
-@discord.app_commands.choices(format_kode=[
-    discord.app_commands.Choice(name="Inline Code (`kode` - tap untuk copy seperti di gambar)", value="inline"),
-    discord.app_commands.Choice(name="Code Block (```lua ... ```)", value="lua"),
-    discord.app_commands.Choice(name="Teks Biasa (tanpa backtick)", value="plain"),
-])
-async def slash_buatlist(
-    interaction: discord.Interaction,
-    nama_channel: str = None,
-    kategori: discord.CategoryChannel = None,
-    channel_tujuan: discord.TextChannel = None,
-    read_only: bool = True,
-    mention_role: discord.Role = None,
-    format_kode: str = "inline",
-):
-    if not _has_mod_perm(interaction.user, "manage_channels"):
-        await interaction.response.send_message("❌ Kamu tidak punya izin `Manage Channels` untuk command ini.", ephemeral=True)
-        return
-    if not nama_channel and not channel_tujuan:
-        await interaction.response.send_message(
-            "❌ Isi minimal salah satu: `nama_channel` (untuk buat channel baru) atau `channel_tujuan` (untuk channel yang sudah ada).",
+async def _send_custom_post(ch, body):
+    """Wrap baris loadstring(...) otomatis dengan backtick, lalu pecah per <=1950 char."""
+    out_lines = []
+    for ln in body.splitlines():
+        s = ln.strip()
+        if s.startswith("loadstring(") and not s.startswith("`"):
+            out_lines.append(f"`{s}`")
+        else:
+            out_lines.append(ln)
+    final_text = "\n".join(out_lines)
+    chunks = []
+    cur = ""
+    for para in final_text.split("\n\n"):
+        cand = f"{cur}\n\n{para}" if cur else para
+        if len(cand) <= 1950:
+            cur = cand
+        else:
+            if cur:
+                chunks.append(cur)
+            if len(para) <= 1950:
+                cur = para
+            else:
+                for start in range(0, len(para), 1950):
+                    chunks.append(para[start:start + 1950])
+                cur = ""
+    if cur:
+        chunks.append(cur)
+    for chunk in chunks:
+        await ch.send(chunk, allowed_mentions=discord.AllowedMentions(roles=True))
+    return len(chunks)
+
+
+class BuatChannelModal(discord.ui.Modal, title="Buat Channel & Isi Pesan"):
+    isi_pesan = discord.ui.TextInput(
+        label="Isi Pesan (bebas paste langsung)",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=4000,
+        placeholder="Inilah beberapa list loadstring...\n\n1. ELYSIUM HUB (No Key)\nloadstring(game:HttpGet(\"...\"))()",
+    )
+
+    def __init__(self, channel_name, category, new_category_name, read_only):
+        super().__init__()
+        self.channel_name = channel_name
+        self.category = category
+        self.new_category_name = new_category_name
+        self.read_only = read_only
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        cat = self.category
+        if self.new_category_name:
+            cat = find_category(guild, self.new_category_name) or await guild.create_category(
+                self.new_category_name[:100], reason=f"/buat oleh {interaction.user}"
+            )
+        overwrites = None
+        if self.read_only:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(send_messages=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            }
+        try:
+            ch = await guild.create_text_channel(
+                name=self.channel_name[:100],
+                category=cat,
+                overwrites=overwrites or discord.utils.MISSING,
+                reason=f"/buat oleh {interaction.user}",
+            )
+            sent_count = await _send_custom_post(ch, self.isi_pesan.value)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Bot tidak punya izin membuat channel atau mengirim pesan.", ephemeral=True)
+            return
+        except discord.HTTPException as exc:
+            await interaction.followup.send(f"❌ Gagal: `{exc}`", ephemeral=True)
+            return
+
+        cat_info = f" di kategori **{cat.name}**" if cat else ""
+        await interaction.followup.send(
+            f"✅ Channel {ch.mention} berhasil dibuat{cat_info} & diisi ({sent_count} pesan).",
             ephemeral=True,
         )
+
+
+@tree.command(name="buat", description="Buat channel baru + langsung paste isi pesannya (gampang)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(
+    nama_channel="Nama channel baru (contoh: │ 🐱-loadstring-adopt-me)",
+    kategori="Pilih kategori yang sudah ada (opsional)",
+    kategori_baru="Atau ketik nama kategori baru jika belum ada (opsional)",
+    read_only="Kunci channel agar member hanya bisa baca (default: Ya)",
+)
+async def slash_buat(
+    interaction: discord.Interaction,
+    nama_channel: str,
+    kategori: discord.CategoryChannel = None,
+    kategori_baru: str = None,
+    read_only: bool = True,
+):
+    if not _has_mod_perm(interaction.user, "manage_channels"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin `Manage Channels`.", ephemeral=True)
         return
-    modal = CustomListModal(
-        channel_name=nama_channel,
-        category=kategori,
-        target_channel=channel_tujuan,
-        read_only=read_only,
-        mention_role=mention_role,
-        code_format=format_kode,
-    )
-    await interaction.response.send_modal(modal)
+    await interaction.response.send_modal(BuatChannelModal(nama_channel, kategori, kategori_baru, read_only))
 
 
 # --- Mod-Log Helpers ------------------------------------------------------
@@ -2214,30 +2275,9 @@ async def on_message(msg):
                 name=ch_name[:100], category=cat, overwrites=ow, reason=f"!buat oleh {msg.author}"
             )
             created = True
-        out_lines = []
-        for ln in body.splitlines():
-            s = ln.strip()
-            if s.startswith("loadstring(") and not s.startswith("`"):
-                out_lines.append(f"`{s}`")
-            else:
-                out_lines.append(ln)
-        final_text = "\n".join(out_lines)
-        chunks = []
-        cur = ""
-        for para in final_text.split("\n\n"):
-            cand = f"{cur}\n\n{para}" if cur else para
-            if len(cand) <= 1950:
-                cur = cand
-            else:
-                if cur:
-                    chunks.append(cur)
-                cur = para[:1950]
-        if cur:
-            chunks.append(cur)
-        for chunk in chunks:
-            await ch.send(chunk, allowed_mentions=discord.AllowedMentions(roles=True))
+        sent_count = await _send_custom_post(ch, body)
         await msg.reply(
-            f"✅ Channel {ch.mention} {'dibuat & ' if created else ''}diisi ({len(chunks)} pesan).",
+            f"✅ Channel {ch.mention} {'dibuat & ' if created else ''}diisi ({sent_count} pesan).",
             mention_author=False,
         )
         return
