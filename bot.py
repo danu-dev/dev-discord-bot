@@ -501,4 +501,10 @@ if __name__ == "__main__":
     try:
         client.run(get_discord_token(), log_handler=None)
     except discord.PrivilegedIntentsRequired:
-        sys.exit("MESSAGE_CONTENT intent belum aktif di Developer Portal")
+        log("⚠️ PRESENCE intent belum aktif di Developer Portal, mencoba jalan tanpa presences...")
+        intents.presences = False
+        client._connection._intents.presences = False
+        try:
+            client.run(get_discord_token(), log_handler=None)
+        except discord.PrivilegedIntentsRequired:
+            sys.exit("MESSAGE_CONTENT / MEMBERS intent belum aktif di Developer Portal")
