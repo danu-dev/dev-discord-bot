@@ -590,25 +590,40 @@ async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
 @tree.command(name="roulette", description="Main Roulette pakai koin", guild=discord.Object(id=GUILD_ID))
 @discord.app_commands.describe(
     taruhan="Jumlah taruhan (10 - 5000 koin)",
-    pilihan="merah, hitam, genap, ganjil, 1-18, 19-36, hijau, atau 0-36",
+    pilihan="Pilih warna, genap/ganjil, atau besar/kecil",
+    angka="Atau tebak angka persis 0 - 36 (hadiah 36x)",
 )
-async def slash_roulette(interaction: discord.Interaction, taruhan: int, pilihan: str):
+@discord.app_commands.choices(pilihan=[
+    discord.app_commands.Choice(name="🔴 Merah (menang 2x)", value="merah"),
+    discord.app_commands.Choice(name="⚫ Hitam (menang 2x)", value="hitam"),
+    discord.app_commands.Choice(name="🔢 Genap (menang 2x)", value="genap"),
+    discord.app_commands.Choice(name="🔢 Ganjil (menang 2x)", value="ganjil"),
+    discord.app_commands.Choice(name="⬇️ Kecil 1-18 (menang 2x)", value="1-18"),
+    discord.app_commands.Choice(name="⬆️ Besar 19-36 (menang 2x)", value="19-36"),
+    discord.app_commands.Choice(name="🟢 Hijau / 0 (menang 36x)", value="hijau"),
+])
+async def slash_roulette(
+    interaction: discord.Interaction,
+    taruhan: int,
+    pilihan: discord.app_commands.Choice[str] = None,
+    angka: int = None,
+):
     if not 10 <= taruhan <= 5000:
         await interaction.response.send_message("❌ Taruhan harus antara **10 sampai 5000 Koin**.", ephemeral=True)
         return
-    pick = pilihan.strip().lower()
-    aliases = {
-        "red": "merah", "black": "hitam", "even": "genap", "odd": "ganjil",
-        "low": "1-18", "high": "19-36", "green": "hijau",
-    }
-    pick = aliases.get(pick, pick)
-    is_num = pick.isdigit() and 0 <= int(pick) <= 36
-    valid_bets = {"merah", "hitam", "genap", "ganjil", "1-18", "19-36", "hijau"}
-    if not is_num and pick not in valid_bets:
-        await interaction.response.send_message(
-            "❌ Pilihan tidak valid! Gunakan: `merah`, `hitam`, `genap`, `ganjil`, `1-18`, `19-36`, `hijau`, atau angka `0`-`36`.",
-            ephemeral=True,
-        )
+    if angka is not None:
+        if not 0 <= angka <= 36:
+            await interaction.response.send_message("❌ Angka harus antara **0 sampai 36**.", ephemeral=True)
+            return
+        pick = str(angka)
+        pick_label = f"Angka {angka}"
+        is_num = True
+    elif pilihan is not None:
+        pick = pilihan.value
+        pick_label = pilihan.name
+        is_num = False
+    else:
+        await interaction.response.send_message("❌ Pilih `pilihan` dari menu atau isi `angka` (0-36).", ephemeral=True)
         return
     bal = _get_coins(interaction.user.id)
     if bal < taruhan:
@@ -654,7 +669,7 @@ async def slash_roulette(interaction: discord.Interaction, taruhan: int, pilihan
 
     e = discord.Embed(
         title="🎡 ╎ Roulette",
-        description=f"Bola berhenti di: {color_emoji} **{num} ({color_name})**\nPilihanmu: **`{pilihan}`** • Taruhan: **{taruhan} Koin**\n\n{res_txt}",
+        description=f"Bola berhenti di: {color_emoji} **{num} ({color_name})**\nPilihanmu: **{pick_label}** • Taruhan: **{taruhan} Koin**\n\n{res_txt}",
         colour=col,
     )
     e.set_footer(text=f"Saldo: {_get_coins(interaction.user.id)} Koin")
