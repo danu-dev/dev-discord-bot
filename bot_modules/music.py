@@ -39,7 +39,7 @@ _setup_voice_logging()
 def _search_track(query):
     import yt_dlp
     opts = {
-        "format": "bestaudio[protocol^=http][ext!=m3u8]/bestaudio/best",
+        "format": "bestaudio[acodec=opus][protocol^=http][ext!=m3u8]/bestaudio[protocol^=http][ext!=m3u8]/bestaudio/best",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -89,10 +89,13 @@ def _make_audio_source(url, headers=None):
         if hdr:
             before.append(f'-headers "{hdr}"')
     before_str = " ".join(before) or None
-    if discord.opus.is_loaded():
-        raw = discord.FFmpegPCMAudio(url, before_options=before_str, options="-vn")
-        return discord.PCMVolumeTransformer(raw, volume=1.0)
-    return discord.FFmpegOpusAudio(url, before_options=before_str, options="-vn")
+    return discord.FFmpegOpusAudio(
+        url,
+        bitrate=192,
+        codec="libopus",
+        before_options=before_str,
+        options="-vn -ar 48000 -ac 2 -application audio",
+    )
 
 
 async def _wait_dave_ready(vc, timeout=5.0):
