@@ -1365,6 +1365,120 @@ def _is_temp_voice(ch):
     return ch.id in TEMP_VOICE_IDS or (ch.name.startswith("🔊 ╎ ") and ch.id not in PERMANENT_VOICE_IDS)
 
 
+TEMP_VOICE_OWNERS = {}
+
+
+def _is_temp_room_owner(interaction):
+    ch = interaction.channel
+    if not isinstance(ch, discord.VoiceChannel):
+        return False
+    uid = interaction.user.id
+    return (
+        uid == OWNER_ID
+        or TEMP_VOICE_OWNERS.get(ch.id) == uid
+        or ch.permissions_for(interaction.user).manage_channels
+    )
+
+
+class TempVoiceLimitModal(discord.ui.Modal, title="Atur Batas Member Room"):
+    limit = discord.ui.TextInput(
+        label="Maksimal orang (0 = tanpa batas, 1-99)",
+        placeholder="Contoh: 5",
+        max_length=2,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ch = interaction.channel
+        if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        if not self.limit.value.strip().isdigit():
+            await interaction.response.send_message("❌ Masukkan angka 0 sampai 99.", ephemeral=True)
+            return
+        val = max(0, min(99, int(self.limit.value.strip())))
+        await ch.edit(user_limit=val, reason=f"Temp Voice Limit oleh {interaction.user}")
+        msg = "tanpa batas" if val == 0 else f"maksimal **{val} orang**"
+        await interaction.response.send_message(f"👥 Batas room diatur menjadi {msg}.", ephemeral=True)
+
+
+class TempVoiceRenameModal(discord.ui.Modal, title="Ganti Nama Room"):
+    nama = discord.ui.TextInput(label="Nama Room Baru", placeholder="Contoh: Mabar ML", max_length=90, required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ch = interaction.channel
+        if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        raw = self.nama.value.strip()
+        new_name = raw if raw.startswith("🔊 ╎ ") else f"🔊 ╎ {raw}"
+        await ch.edit(name=new_name[:100], reason=f"Temp Voice Rename oleh {interaction.user}")
+        await interaction.response.send_message(f"✏️ Nama room diubah menjadi **{new_name}**.", ephemeral=True)
+
+
+class TempVoiceKickSelect(discord.ui.UserSelect):
+    def __init__(self):
+        super().__init__(placeholder="Pilih member yang mau dikeluarkan dari room...", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        ch = interaction.channel
+        if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        target = interaction.guild.get_member(self.values[0].id)
+        if not target or not target.voice or target.voice.channel != ch:
+            await interaction.response.send_message("❌ Member tersebut tidak ada di room ini.", ephemeral=True)
+            return
+        if target.id == interaction.user.id:
+            await interaction.response.send_message("❌ Tidak bisa kick diri sendiri.", ephemeral=True)
+            return
+        await target.move_to(None, reason=f"Di-kick dari temp voice oleh {interaction.user}")
+        await interaction.response.send_message(f"👢 {target.mention} dikeluarkan dari room.", ephemeral=True)
+
+
+class TempVoiceView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Lock / Unlock", emoji="🔒", style=discord.ButtonStyle.secondary, custom_id="tv_lock")
+    async def lock_btn(self, interaction: discord.Interaction, _b):
+        ch = interaction.channel
+        if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        ow = ch.overwrites_for(interaction.guild.default_role)
+        currently_locked = ow.connect is False
+        if currently_locked:
+            await ch.set_permissions(interaction.guild.default_role, connect=None, reason="Unlock temp voice")
+            await interaction.response.send_message("🔓 Room dibuka kembali untuk semua member.", ephemeral=True)
+        else:
+            await ch.set_permissions(interaction.guild.default_role, connect=False, reason="Lock temp voice")
+            await interaction.response.send_message("🔒 Room dikunci! Member lain tidak bisa masuk.", ephemeral=True)
+
+    @discord.ui.button(label="Batas Orang", emoji="👥", style=discord.ButtonStyle.primary, custom_id="tv_limit")
+    async def limit_btn(self, interaction: discord.Interaction, _b):
+        if not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        await interaction.response.send_modal(TempVoiceLimitModal())
+
+    @discord.ui.button(label="Ganti Nama", emoji="✏️", style=discord.ButtonStyle.secondary, custom_id="tv_rename")
+    async def rename_btn(self, interaction: discord.Interaction, _b):
+        if not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        await interaction.response.send_modal(TempVoiceRenameModal())
+
+    @discord.ui.button(label="Kick Member", emoji="👢", style=discord.ButtonStyle.danger, custom_id="tv_kick")
+    async def kick_btn(self, interaction: discord.Interaction, _b):
+        if not _is_temp_room_owner(interaction):
+            await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=60)
+        v.add_item(TempVoiceKickSelect())
+        await interaction.response.send_message("Pilih member yang mau di-kick dari room:", view=v, ephemeral=True)
+
+
 @client.event
 async def on_voice_state_update(member, before, after):
     if member.guild.id != GUILD_ID:
@@ -1373,10 +1487,13 @@ async def on_voice_state_update(member, before, after):
         after.channel.id == TEMP_VOICE_HUB_ID or after.channel.name == TEMP_VOICE_HUB_NAME
     ):
         cat = after.channel.category
+        ow = dict(cat.overwrites) if cat else {}
+        ow[member] = discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True)
         room = await member.guild.create_voice_channel(
-            f"🔊 ╎ {member.display_name}", category=cat, reason="Join-to-Create Voice"
+            f"🔊 ╎ {member.display_name}", category=cat, overwrites=ow, reason="Join-to-Create Voice"
         )
         TEMP_VOICE_IDS.add(room.id)
+        TEMP_VOICE_OWNERS[room.id] = member.id
         await asyncio.sleep(0.25)
         moved = False
         for attempt in range(2):
@@ -1387,14 +1504,26 @@ async def on_voice_state_update(member, before, after):
             except Exception as exc:
                 log(f"temp voice move attempt {attempt + 1} failed:", exc)
                 await asyncio.sleep(0.5)
-        if not moved and len(room.members) == 0:
+        if moved:
+            try:
+                e = discord.Embed(
+                    title="🔊 ╎ Kontrol Room Voice",
+                    description=f"Room milik {member.mention}. Gunakan tombol di bawah untuk mengatur room kamu:",
+                    colour=BLURPLE,
+                )
+                await room.send(embed=e, view=TempVoiceView())
+            except Exception as exc:
+                log("temp voice panel send failed:", exc)
+        elif len(room.members) == 0:
             TEMP_VOICE_IDS.discard(room.id)
+            TEMP_VOICE_OWNERS.pop(room.id, None)
             try:
                 await room.delete(reason="Gagal memindahkan member ke temp voice")
             except Exception as exc:
                 log("temp voice cleanup failed:", exc)
     if before.channel and before.channel != after.channel and _is_temp_voice(before.channel) and len(before.channel.members) == 0:
         TEMP_VOICE_IDS.discard(before.channel.id)
+        TEMP_VOICE_OWNERS.pop(before.channel.id, None)
         try:
             await before.channel.delete(reason="Temp voice kosong")
         except Exception as exc:
@@ -2567,6 +2696,7 @@ async def on_ready():
     client.add_view(NextMusicView())
     client.add_view(FounderManageView())
     client.add_view(GiveawayView())
+    client.add_view(TempVoiceView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
