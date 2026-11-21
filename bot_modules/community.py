@@ -444,24 +444,28 @@ class TempVoiceRenameModal(discord.ui.Modal, title="Ganti Nama Room"):
         await interaction.response.send_message(f"✏️ Nama room diubah menjadi **{new_name}**.", ephemeral=True)
 
 
-class TempVoiceKickSelect(discord.ui.UserSelect):
-    def __init__(self):
-        super().__init__(placeholder="Pilih member yang mau dikeluarkan dari room...", min_values=1, max_values=1)
+class TempVoiceKickSelect(discord.ui.Select):
+    def __init__(self, members):
+        opts = [
+            discord.SelectOption(label=m.display_name[:100], value=str(m.id), description=f"@{m.name}")
+            for m in members[:25]
+        ]
+        super().__init__(placeholder="Pilih member yang ada di room...", min_values=1, max_values=1, options=opts)
 
     async def callback(self, interaction: discord.Interaction):
         ch = interaction.channel
         if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
             await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
             return
-        target = interaction.guild.get_member(self.values[0].id)
+        target = interaction.guild.get_member(int(self.values[0]))
         if not target or not target.voice or target.voice.channel != ch:
-            await interaction.response.send_message("❌ Member tersebut tidak ada di room ini.", ephemeral=True)
+            await interaction.response.send_message("❌ Member tersebut sudah keluar dari room.", ephemeral=True)
             return
-        if target.id == interaction.user.id:
-            await interaction.response.send_message("❌ Tidak bisa kick diri sendiri.", ephemeral=True)
+        if target.bot or target.id == interaction.user.id:
+            await interaction.response.send_message("❌ Tidak bisa kick bot atau diri sendiri.", ephemeral=True)
             return
         await target.move_to(None, reason=f"Di-kick dari temp voice oleh {interaction.user}")
-        await interaction.response.send_message(f"👢 {target.mention} dikeluarkan dari room.", ephemeral=True)
+        await interaction.response.edit_message(content=f"👢 {target.mention} dikeluarkan dari room.", view=None)
 
 
 class TempVoiceView(discord.ui.View):
@@ -499,12 +503,17 @@ class TempVoiceView(discord.ui.View):
 
     @discord.ui.button(label="Kick Member", emoji="👢", style=discord.ButtonStyle.danger, custom_id="tv_kick")
     async def kick_btn(self, interaction: discord.Interaction, _b):
-        if not _is_temp_room_owner(interaction):
+        ch = interaction.channel
+        if not isinstance(ch, discord.VoiceChannel) or not _is_temp_room_owner(interaction):
             await interaction.response.send_message("❌ Khusus pemilik room.", ephemeral=True)
             return
+        kickable = [m for m in ch.members if not m.bot and m.id != interaction.user.id]
+        if not kickable:
+            await interaction.response.send_message("ℹ️ Tidak ada member lain di room ini yang bisa di-kick.", ephemeral=True)
+            return
         v = discord.ui.View(timeout=60)
-        v.add_item(TempVoiceKickSelect())
-        await interaction.response.send_message("Pilih member yang mau di-kick dari room:", view=v, ephemeral=True)
+        v.add_item(TempVoiceKickSelect(kickable))
+        await interaction.response.send_message("Pilih member di room ini yang mau dikeluarkan:", view=v, ephemeral=True)
 
 
 
