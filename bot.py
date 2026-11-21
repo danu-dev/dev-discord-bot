@@ -177,6 +177,19 @@ async def on_invite_delete(invite):
 
 
 
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    log("slash command error:", repr(error))
+    msg = f"❌ Terjadi error: `{error}`"
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+    except Exception:
+        pass
+
+
 @client.event
 async def on_ready():
     client.add_view(RolePickerView())
