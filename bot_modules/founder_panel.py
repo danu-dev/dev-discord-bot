@@ -267,6 +267,15 @@ class FounderManageView(discord.ui.View):
         v.add_item(FounderConfigChannelSelect())
         await interaction.response.send_message("Pilih channel teks yang mau diatur slowmode/topiknya:", view=v, ephemeral=True)
 
+    @discord.ui.button(label="Add Role", emoji="👤", style=discord.ButtonStyle.primary, custom_id="fnd_add_role", row=1)
+    async def add_role_btn(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderQuickTargetSelect())
+        await interaction.response.send_message("Pilih orang atau bot yang mau dikasih role:", view=v, ephemeral=True)
+
 
 class FounderCreateRoleModal(discord.ui.Modal, title="Buat Role Baru"):
     nama = discord.ui.TextInput(label="Nama Role", placeholder="Contoh: ⭐ VIP", max_length=100, required=True)
@@ -306,23 +315,70 @@ class FounderEditRoleModal(discord.ui.Modal, title="Edit Role"):
         await interaction.response.send_message(f"✅ Role {self.role.mention} diperbarui.", ephemeral=True)
 
 
+class FounderQuickRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, target_ids):
+        self.target_ids = target_ids
+        super().__init__(placeholder="Pilih role yang mau dipasang...", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        role = interaction.guild.get_role(self.values[0].id)
+        if not role or role.is_default() or role.managed:
+            await interaction.response.send_message("❌ Role tersebut tidak bisa dipasang manual.", ephemeral=True)
+            return
+        ok, fail = [], []
+        for uid in self.target_ids:
+            m = interaction.guild.get_member(uid)
+            if not m:
+                continue
+            try:
+                await m.add_roles(role, reason=f"Founder Panel oleh {interaction.user}")
+                ok.append(m.mention)
+            except discord.Forbidden:
+                fail.append(m.display_name)
+        msg = f"✅ Role {role.mention} diberikan ke: {', '.join(ok)}" if ok else ""
+        if fail:
+            msg += f"\n❌ Gagal (posisi role lebih tinggi dari bot): {', '.join(fail)}"
+        await interaction.response.send_message(msg or "❌ Tidak ada target valid.", ephemeral=True)
+
+
+class FounderQuickTargetSelect(discord.ui.UserSelect):
+    def __init__(self):
+        super().__init__(placeholder="Pilih 1 atau lebih orang / bot...", min_values=1, max_values=10)
+
+    async def callback(self, interaction: discord.Interaction):
+        ids = [u.id for u in self.values]
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderQuickRoleSelect(ids))
+        names = ", ".join(u.mention for u in self.values)
+        await interaction.response.send_message(f"Target: {names}\nSekarang pilih role-nya:", view=v, ephemeral=True)
+
+
 class FounderRoleMemberSelect(discord.ui.UserSelect):
     def __init__(self, role, give=True):
         self.role = role
         self.give = give
-        super().__init__(placeholder="Pilih member...", min_values=1, max_values=1)
+        super().__init__(placeholder="Pilih orang atau bot...", min_values=1, max_values=10)
 
     async def callback(self, interaction: discord.Interaction):
-        member = interaction.guild.get_member(self.values[0].id)
-        if not member:
-            await interaction.response.send_message("❌ Member tidak ditemukan.", ephemeral=True)
-            return
-        if self.give:
-            await member.add_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
-            await interaction.response.send_message(f"✅ Role {self.role.mention} diberikan ke {member.mention}.", ephemeral=True)
-        else:
-            await member.remove_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
-            await interaction.response.send_message(f"✅ Role {self.role.mention} dicabut dari {member.mention}.", ephemeral=True)
+        ok = []
+        for u in self.values:
+            member = interaction.guild.get_member(u.id)
+            if not member:
+                continue
+            try:
+                if self.give:
+                    await member.add_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
+                else:
+                    await member.remove_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
+                ok.append(member.mention)
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    f"❌ Bot tidak punya izin mengatur role {self.role.mention} (pastikan posisi role bot lebih tinggi).",
+                    ephemeral=True,
+                )
+                return
+        verb = "diberikan ke" if self.give else "dicabut dari"
+        await interaction.response.send_message(f"✅ Role {self.role.mention} {verb}: {', '.join(ok)}.", ephemeral=True)
 
 
 class FounderRoleActionView(discord.ui.View):
