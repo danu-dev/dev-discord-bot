@@ -675,11 +675,6 @@ _WORK_JACKPOTS = [
     ("Juara Mini Turnamen", 120, 180),
     ("Dapet Donasi pas Live", 110, 165),
 ]
-_WORK_FAILS = [
-    "Wifi putus pas lagi joki, gagal dapet bayaran.",
-    "Ketiduran pas shift, gaji hangus.",
-    "Kalah taruhan match, pulang tangan kosong.",
-]
 
 
 @tree.command(name="kerja", description="Cari koin lewat kerja sampingan", guild=discord.Object(id=GUILD_ID))
@@ -698,25 +693,16 @@ async def slash_kerja(interaction: discord.Interaction):
         )
         return
     work_cd_map[uid] = now
-    roll = _rng.random()
-    if roll < 0.12:
+    if _rng.random() < 0.15:
         job_name, lo, hi = _rng.choice(_WORK_JACKPOTS)
-        earned = _rng.randint(lo, hi)
         title = "🎉 Bonus Kerja"
-        desc = f"**{job_name}** — dapet **+{earned} Koin**"
         col = GOLD
-    elif roll < 0.30:
-        reason = _rng.choice(_WORK_FAILS)
-        earned = 0
-        title = "😅 Zonk"
-        desc = f"{reason}\nDapet **0 Koin**."
-        col = RED
     else:
         job_name, lo, hi = _rng.choice(_WORK_JOBS)
-        earned = _rng.randint(lo, hi)
         title = "💼 Kerja Sampingan"
-        desc = f"**{job_name}** — dapet **+{earned} Koin**"
         col = GREEN
+    earned = _rng.randint(lo, hi)
+    desc = f"**{job_name}** — dapet **+{earned} Koin**"
     new_bal = _add_coins(interaction.user.id, earned)
     e = discord.Embed(title=title, description=desc, colour=col)
     e.set_footer(text=f"Saldo: {new_bal} Koin")
