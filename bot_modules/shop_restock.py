@@ -250,15 +250,32 @@ async def _send_restock_webhook(product, event_type, old_stock, new_stock):
     special_url = os.environ.get("WEBHOOK_SPECIAL_URL", "").strip()
     premium_url = os.environ.get("WEBHOOK_PREMIUM_URL", "").strip()
     url = special_url if (is_special and special_url) else (premium_url or special_url)
-    if not url:
-        return False
 
     embed = _build_restock_embed(product, event_type, old_stock, new_stock)
     content = "@here 💠 **SPECIAL RESTOCK TELAH TIBA!**" if (is_special and event_type != "OUT_OF_STOCK") else None
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            wh = discord.Webhook.from_url(url, session=session)
-            await wh.send(content=content, embed=embed, username="SHOP RESTOCK SYSTEM")
+        if url:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                wh = discord.Webhook.from_url(url, session=session)
+                await wh.send(content=content, embed=embed, username="SHOP RESTOCK SYSTEM")
+            return True
+
+        # Fallback otomatis jika .env kosong: pakai webhook di #🛒╎shop
+        guild = client.get_guild(GUILD_ID)
+        shop_ch = (guild.get_channel(1573753246755848317) if guild else None) or (
+            discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "shop" in c.name.lower(), guild.channels)
+            if guild
+            else None
+        )
+        if not shop_ch:
+            return False
+        whs = await shop_ch.webhooks()
+        wh = discord.utils.find(lambda w: w.name == "SHOP RESTOCK SYSTEM" and w.token, whs) or (
+            discord.utils.find(lambda w: bool(w.token), whs)
+        )
+        if not wh:
+            wh = await shop_ch.create_webhook(name="SHOP RESTOCK SYSTEM", reason="Auto-provision restock webhook")
+        await wh.send(content=content, embed=embed, username="SHOP RESTOCK SYSTEM")
         return True
     except Exception as exc:
         log("restock webhook error:", type(exc).__name__)
