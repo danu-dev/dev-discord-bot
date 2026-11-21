@@ -1531,7 +1531,13 @@ async def _on_track_end(guild, text_channel, err=None):
         if text_channel and t:
             await text_channel.send(embed=_music_embed(t, guild.voice_client.channel.name), view=LofiView())
     else:
+        last_title = (NOW_PLAYING.get("track") or {}).get("title")
         NOW_PLAYING["track"] = None
+        vc = guild.voice_client
+        if text_channel and vc and vc.is_connected():
+            desc = f"Lagu **{last_title}** sudah selesai.\nPilih musik selanjutnya dari dropdown di bawah, klik **🔎 Cari Lagu**, atau ketik `/play`:" if last_title else "Pilih musik selanjutnya dari dropdown di bawah:"
+            e = discord.Embed(title="🎵 ╎ Musik Selanjutnya", description=desc, colour=0x9B59B6)
+            await text_channel.send(embed=e, view=NextMusicView())
 
 
 def _play_station(vc, idx):
@@ -1556,7 +1562,7 @@ def _music_embed(track, channel_name):
         description=f"{link}\nVoice: **{channel_name}**{q_info}",
         colour=0x9B59B6,
     )
-    e.set_footer(text=f"Diminta oleh {track.get('requester', 'member')} • !play <judul> | !skip | !stop")
+    e.set_footer(text=f"Diminta oleh {track.get('requester', 'member')} • /play <judul> | /skip | /stop")
     return e
 
 
@@ -1564,7 +1570,7 @@ def _lofi_embed(title, channel_name):
     e = discord.Embed(
         title="🎧 ╎ Lofi Radio 24/7",
         description=f"Sedang memutar **{title}** di **{channel_name}**\n"
-                    f"Perintah: `!lofi` • `!lofi next` • `!play <judul>` • `!stop`",
+                    f"Perintah: `/lofi` • `/skip` • `/play <judul>` • `/stop`",
         colour=0x9B59B6,
     )
     e.set_footer(text="Otomatis keluar jika voice kosong")
@@ -1590,6 +1596,110 @@ class LofiView(discord.ui.View):
 
     @discord.ui.button(label="Stop", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="lofi_stop")
     async def stop_btn(self, interaction, _b):
+        MUSIC_QUEUE.clear()
+        NOW_PLAYING["track"] = None
+        vc = interaction.guild.voice_client
+        if vc:
+            vc.stop()
+            await vc.disconnect()
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="⏹️ ╎ Musik Dimatikan", colour=0x99AAB5), view=None
+        )
+
+
+NEXT_MUSIC_PRESETS = [
+    ("station:lofi", "☕ Lofi Beats Radio", "Radio lofi santai 24/7"),
+    ("station:chillsynth", "🌃 Nightride Chillsynth", "Synthwave & chillwave"),
+    ("station:groove", "🌿 SomaFM Groove Salad", "Ambient & downtempo"),
+    ("station:lush", "🌙 SomaFM Lush", "Vocal chill & mellow"),
+    ("search:lofi hip hop chill beats", "🎧 Lofi Hip Hop Mix", "Putar campuran lofi hip hop"),
+    ("search:lagu pop indonesia hits", "🇮🇩 Lagu Indo Pop Hits", "Putar lagu pop Indonesia"),
+    ("search:gaming phonk music mix", "🎮 Gaming Phonk / EDM", "Putar musik gaming"),
+    ("search:piano relaxing study music", "🎹 Piano Santai", "Putar musik piano santai"),
+]
+
+
+class PlaySongModal(discord.ui.Modal, title="Putar Lagu Baru"):
+    judul = discord.ui.TextInput(
+        label="Judul Lagu atau Link YouTube",
+        placeholder="Contoh: lofi hip hop / judul lagu favoritmu",
+        required=True,
+        max_length=200,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        try:
+            vc = await _ensure_voice(interaction.guild, interaction.user, interaction.channel, interaction.followup.send)
+            if not vc:
+                return
+            track = await asyncio.to_thread(_search_track, self.judul.value)
+            track["requester"] = interaction.user.display_name
+            if vc.is_playing() or vc.is_paused():
+                MUSIC_QUEUE.append(track)
+                await interaction.followup.send(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**")
+            else:
+                MUSIC_QUEUE.append(track)
+                _play_next_in_queue(interaction.guild, interaction.channel)
+                await interaction.followup.send(embed=_music_embed(track, vc.channel.name), view=LofiView())
+        except Exception as exc:
+            log("modal music error:", exc)
+            await interaction.followup.send(f"❌ Gagal memutar audio: `{str(exc)[:180]}`")
+
+
+class NextMusicSelect(discord.ui.Select):
+    def __init__(self):
+        opts = [
+            discord.SelectOption(label=label, value=val, description=desc)
+            for val, label, desc in NEXT_MUSIC_PRESETS
+        ]
+        super().__init__(
+            placeholder="🎵 Pilih musik atau radio selanjutnya...",
+            min_values=1,
+            max_values=1,
+            options=opts,
+            custom_id="next_music_select",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+        await interaction.response.defer()
+        vc = await _ensure_voice(interaction.guild, interaction.user, interaction.channel, interaction.followup.send)
+        if not vc:
+            return
+        if choice.startswith("station:"):
+            key = choice.split(":", 1)[1]
+            station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
+            idx = station_keys.get(key, 0)
+            title = _play_station(vc, idx)
+            await interaction.followup.send(embed=_lofi_embed(title, vc.channel.name), view=LofiView())
+        else:
+            query = choice.split(":", 1)[1]
+            try:
+                track = await asyncio.to_thread(_search_track, query)
+                track["requester"] = interaction.user.display_name
+                if vc.is_playing() or vc.is_paused():
+                    MUSIC_QUEUE.append(track)
+                    await interaction.followup.send(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**")
+                else:
+                    MUSIC_QUEUE.append(track)
+                    _play_next_in_queue(interaction.guild, interaction.channel)
+                    await interaction.followup.send(embed=_music_embed(track, vc.channel.name), view=LofiView())
+            except Exception as exc:
+                await interaction.followup.send(f"❌ Gagal memutar audio: `{str(exc)[:180]}`")
+
+
+class NextMusicView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(NextMusicSelect())
+
+    @discord.ui.button(label="Cari Lagu Lain", emoji="🔎", style=discord.ButtonStyle.primary, custom_id="next_music_search")
+    async def search_btn(self, interaction: discord.Interaction, _b):
+        await interaction.response.send_modal(PlaySongModal())
+
+    @discord.ui.button(label="Stop", emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="next_music_stop")
+    async def stop_btn(self, interaction: discord.Interaction, _b):
         MUSIC_QUEUE.clear()
         NOW_PLAYING["track"] = None
         vc = interaction.guild.voice_client
@@ -1756,6 +1866,7 @@ async def on_ready():
     client.add_view(TicketLauncherView())
     client.add_view(TicketCloseView())
     client.add_view(LofiView())
+    client.add_view(NextMusicView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
