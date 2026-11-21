@@ -525,25 +525,41 @@ async def slash_koin(interaction: discord.Interaction, member: discord.Member = 
     await interaction.response.send_message(embed=e)
 
 
-@ekonomi_group.command(name="shop", description="Buka toko role & produk menggunakan koin")
+@ekonomi_group.command(name="shop", description="Buka toko server menggunakan koin")
 async def slash_shop(interaction: discord.Interaction):
     from bot_modules.shop_restock import _db_run, _list_products_sync, RARITIES
     bal = _get_coins(interaction.user.id)
     all_prods = await _db_run(_list_products_sync)
     in_stock = [p for p in all_prods if p["stock"] > 0]
+
     e = discord.Embed(
-        title="🛒 ╎ Toko Server",
-        description=f"Saldo kamu: **🪙 {bal:,} Koin**\nPilih item di menu bawah untuk membeli. Pemilik role Premium/Special bisa klaim `/ekonomi bulanan`.",
-        colour=BLURPLE,
+        title="🛒 ╎ DEV SERVER SHOP",
+        description=f"💰 **Saldo Kamu:** `{bal:,} Koin`\nPilih item pada menu di bawah untuk langsung membeli & memasang role.",
+        colour=0xD4AF37,
     )
-    if in_stock:
-        lines = [
-            f"• {RARITIES[p['rarity']]['emoji']} **{p['name']}** (`{p['rarity_percent']}%`) — `{p['price']:,} Koin` • Stok: **{p['stock']}**\n  _{p['description'] or '-'}_"
-            for p in in_stock[:20]
-        ]
-        e.add_field(name="📦 Stok Tersedia", value="\n".join(lines)[:1024], inline=False)
-    else:
-        e.add_field(name="📦 Stok Tersedia", value="_Semua stok sedang habis. Tunggu restock dari admin!_", inline=False)
+    if interaction.guild and interaction.guild.icon:
+        e.set_thumbnail(url=interaction.guild.icon.url)
+
+    groups = [
+        ("💠 Special & Divine (0.01% – 0.1%)", ("special", "divine")),
+        ("🌌 Legendary & Mythic (0.5% – 1%)", ("legendary", "mythic")),
+        ("💎 Elite & Premium (3% – 5%)", ("elite", "premium")),
+    ]
+    for group_title, keys in groups:
+        items = [p for p in all_prods if p["rarity"] in keys]
+        if not items:
+            continue
+        lines = []
+        for p in items[:10]:
+            meta = RARITIES[p["rarity"]]
+            stok_txt = f"**`{p['stock']}` stok**" if p["stock"] > 0 else "~~`HABIS`~~"
+            lines.append(f"{meta['emoji']} **{p['name']}** — 🪙 `{p['price']:,}` • {stok_txt}\n┗ _{p['description'] or '-'}_")
+        e.add_field(name=group_title, value="\n".join(lines)[:1024], inline=False)
+
+    if not all_prods:
+        e.add_field(name="📦 Katalog", value="_Belum ada produk di toko._", inline=False)
+
+    e.set_footer(text="Pilih item di dropdown bawah • Bonus pemilik role: /ekonomi bulanan")
     await interaction.response.send_message(embed=e, view=ShopView(in_stock), ephemeral=True)
 
 
