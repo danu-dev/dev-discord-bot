@@ -315,6 +315,7 @@ if os.path.exists(ECONOMY_FILE):
             ECONOMY_DATA["coins"] = _loaded_eco.get("coins", {})
             ECONOMY_DATA["invites"] = _loaded_eco.get("invites", {})
             ECONOMY_DATA["work_cd"] = _loaded_eco.get("work_cd", {})
+            ECONOMY_DATA["monthly_cd"] = _loaded_eco.get("monthly_cd", {})
     except Exception:
         pass
 
@@ -338,21 +339,58 @@ def _add_coins(uid, amount):
     return ECONOMY_DATA["coins"][key]
 
 
-SHOP_ROLES = [
-    ("ruby", "🎨 ╎ Ruby Red", 0xE74C3C, 250, "Role warna merah menyala"),
-    ("cyan", "💎 ╎ Cyan Diamond", 0x1ABC9C, 400, "Role warna biru berlian"),
-    ("gold", "⚡ ╎ Gold Rush", 0xF1C40F, 600, "Role warna emas sultan"),
-    ("sultan", "👑 ╎ Sultan DEV", 0x9B59B6, 1000, "Role ungu eksklusif Sultan DEV"),
+SHOP_COLOR_ROLES = [
+    ("ruby", "🎨 ╎ Ruby Red", 0xE74C3C, 250, "Warna nama merah eksklusif"),
+    ("cyan", "💎 ╎ Cyan Diamond", 0x1ABC9C, 400, "Warna cyan + akses #premium-chat"),
+    ("gold", "⚡ ╎ Gold Rush", 0xF1C40F, 600, "Warna emas + akses #VIP Lounge"),
+    ("sultan", "👑 ╎ Sultan DEV", 0x9B59B6, 1000, "Warna ungu + #sultan-lounge + bonus bulanan"),
 ]
+SHOP_PREMIUM_ROLES = [
+    ("bronze", "🥉 ╎ Bronze Member", 0xCD7F32, 350, "Badge Bronze + warna khusus"),
+    ("silver", "🥈 ╎ Silver Member", 0xBDC3C7, 650, "Badge Silver + akses #premium-chat"),
+    ("gold_m", "🥇 ╎ Gold Member", 0xF1C40F, 1000, "Badge Gold + akses VIP Lounge"),
+    ("diamond", "💠 ╎ Diamond Member", 0x00D2D3, 1500, "Badge Diamond + VIP & bonus bulanan"),
+    ("mythic", "🔮 ╎ Mythic Member", 0x8E44AD, 2200, "Badge Mythic + VIP & bonus bulanan"),
+    ("galaxy", "🌌 ╎ Galaxy Member", 0x5B2C6F, 3000, "Badge Galaxy + #sultan-lounge"),
+    ("dragon", "🐉 ╎ Dragon Lord", 0xE67E22, 4000, "Badge Dragon + prioritas event"),
+    ("cosmic", "☄️ ╎ Cosmic Legend", 0xFF6B81, 5500, "Badge Legend + semua lounge premium"),
+]
+SHOP_SPECIAL_ROLES = [
+    ("dev", "💻 ╎ Developer", 0x2ECC71, 1800, "Akses Developer / Sultan Lounge"),
+    ("top_sup", "🏆 ╎ Top Supporter", 0xF39C12, 2000, "Badge Top Supporter + bonus bulanan"),
+    ("early_sup", "🌟 ╎ Early Supporter", 0xFDCB6E, 1200, "Badge Early Supporter"),
+    ("og", "🔥 ╎ OG Member", 0xE17055, 1600, "Badge OG + akses VIP & #premium-chat"),
+    ("guardian", "🛡️ ╎ Guardian", 0x3498DB, 2800, "Badge Guardian + #sultan-lounge"),
+    ("legendary", "💫 ╎ Legendary", 0xFF9FF3, 4500, "Badge Legendary + semua lounge"),
+]
+SHOP_ROLES = SHOP_COLOR_ROLES + SHOP_PREMIUM_ROLES + SHOP_SPECIAL_ROLES
+
+MONTHLY_BONUS_BY_ROLE = {
+    "☄️ ╎ Cosmic Legend": 2000,
+    "💫 ╎ Legendary": 1800,
+    "🐉 ╎ Dragon Lord": 1500,
+    "🌌 ╎ Galaxy Member": 1200,
+    "🛡️ ╎ Guardian": 1000,
+    "🔮 ╎ Mythic Member": 900,
+    "🏆 ╎ Top Supporter": 800,
+    "💻 ╎ Developer": 750,
+    "🔥 ╎ OG Member": 700,
+    "💠 ╎ Diamond Member": 650,
+    "👑 ╎ Sultan DEV": 600,
+    "🌟 ╎ Early Supporter": 500,
+    "🥇 ╎ Gold Member": 450,
+    "🥈 ╎ Silver Member": 300,
+    "🥉 ╎ Bronze Member": 200,
+}
 
 
 class ShopRoleSelect(discord.ui.Select):
-    def __init__(self):
+    def __init__(self, items, placeholder, custom_id):
         opts = [
             discord.SelectOption(label=f"{name} ({price} Koin)", value=key, description=desc)
-            for key, name, _col, price, desc in SHOP_ROLES
+            for key, name, _col, price, desc in items
         ]
-        super().__init__(placeholder="🛒 Pilih role yang ingin dibeli...", min_values=1, max_values=1, options=opts, custom_id="shop_role_select")
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=opts, custom_id=custom_id)
 
     async def callback(self, interaction: discord.Interaction):
         key = self.values[0]
@@ -391,7 +429,9 @@ class ShopRoleSelect(discord.ui.Select):
 class ShopView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(ShopRoleSelect())
+        self.add_item(ShopRoleSelect(SHOP_COLOR_ROLES, "🎨 Pilih Color Role...", "shop_color_select"))
+        self.add_item(ShopRoleSelect(SHOP_PREMIUM_ROLES, "💎 Pilih Premium Role...", "shop_premium_select"))
+        self.add_item(ShopRoleSelect(SHOP_SPECIAL_ROLES, "👑 Pilih Special Collection...", "shop_special_select"))
 
 
 @tree.command(name="koin", description="Cek saldo koin & XP kamu atau member lain", guild=discord.Object(id=GUILD_ID))
@@ -412,13 +452,41 @@ async def slash_koin(interaction: discord.Interaction, member: discord.Member = 
 @tree.command(name="shop", description="Buka toko role menggunakan koin", guild=discord.Object(id=GUILD_ID))
 async def slash_shop(interaction: discord.Interaction):
     bal = _get_coins(interaction.user.id)
-    lines = [f"• **{name}** — `{price} Koin` ({desc})" for _k, name, _c, price, desc in SHOP_ROLES]
+    fmt = lambda items: "\n".join(f"• **{name}** — `{price} Koin` ({desc})" for _k, name, _c, price, desc in items)
     e = discord.Embed(
-        title="🛒 ╎ Toko Role DEV Server",
-        description=f"Saldo kamu saat ini: **🪙 {bal} Koin**\n\n" + "\n".join(lines),
+        title="🛒 ╎ Toko Role",
+        description=f"Saldo kamu: **🪙 {bal} Koin**\nPemilik role Premium/Special bisa klaim bonus bulanan lewat `/klaim-bulanan`.",
         colour=BLURPLE,
     )
+    e.add_field(name="🎨 Color Roles", value=fmt(SHOP_COLOR_ROLES), inline=False)
+    e.add_field(name="💎 Premium Roles", value=fmt(SHOP_PREMIUM_ROLES), inline=False)
+    e.add_field(name="👑 Special Collection", value=fmt(SHOP_SPECIAL_ROLES), inline=False)
     await interaction.response.send_message(embed=e, view=ShopView(), ephemeral=True)
+
+
+@tree.command(name="klaim-bulanan", description="Klaim bonus koin bulanan untuk pemilik Role Shop", guild=discord.Object(id=GUILD_ID))
+async def slash_monthly(interaction: discord.Interaction):
+    member_role_names = {r.name for r in interaction.user.roles}
+    best_name, best_bonus = None, 0
+    for rname, bonus in MONTHLY_BONUS_BY_ROLE.items():
+        if rname in member_role_names and bonus > best_bonus:
+            best_name, best_bonus = rname, bonus
+    if not best_name:
+        await interaction.response.send_message("❌ Kamu belum punya role Premium/Special/Sultan dari `/shop`.", ephemeral=True)
+        return
+    uid = str(interaction.user.id)
+    monthly_map = ECONOMY_DATA.setdefault("monthly_cd", {})
+    now = time.time()
+    elapsed = now - float(monthly_map.get(uid, 0))
+    if elapsed < 2592000:
+        days_left = int((2592000 - elapsed) // 86400) + 1
+        await interaction.response.send_message(f"⏳ Bonus bulanan sudah diklaim! Coba lagi dalam **{days_left} hari**.", ephemeral=True)
+        return
+    monthly_map[uid] = now
+    new_bal = _add_coins(interaction.user.id, best_bonus)
+    await interaction.response.send_message(
+        f"🎁 **Bonus Bulanan ({best_name})!** Kamu dapat **+{best_bonus} Koin**.\nSaldo sekarang: **{new_bal} Koin**."
+    )
 
 
 @tree.command(name="givekoin", description="Tambah koin ke member (khusus Owner)", guild=discord.Object(id=GUILD_ID))

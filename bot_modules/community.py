@@ -20,7 +20,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🛠️ Komunitas & Info",
-        value="`/help` • `/koin` • `/shop` • `/invites` • `/snipe` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        value="`/help` • `/koin` • `/shop` • `/klaim-bulanan` • `/invites` • `/snipe` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
         inline=False,
     )
     e.add_field(
