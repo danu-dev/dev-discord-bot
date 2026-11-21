@@ -2,6 +2,7 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 
 from bot_modules.core import *
+from bot_modules.core import _has_mod_perm, _send_modlog
 
 RULES_CHANNEL_ID = 1573525422585684185
 VERIFY_CONFIG_FILE = os.environ.get("VERIFY_CONFIG_FILE", "dev-verify-config.json")
