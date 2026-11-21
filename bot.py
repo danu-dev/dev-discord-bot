@@ -652,7 +652,7 @@ def _help_embed(member):
     if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
-            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel`\n"
+            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/giveaway`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
@@ -2160,7 +2160,7 @@ class FounderManageView(discord.ui.View):
         v.add_item(FounderTargetSelect("perm"))
         await interaction.response.send_message("Pilih channel/kategori yang mau diatur permission-nya:", view=v, ephemeral=True)
 
-    @discord.ui.button(label="Hapus", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="fnd_delete")
+    @discord.ui.button(label="Hapus", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="fnd_delete", row=0)
     async def del_ch(self, interaction: discord.Interaction, _b):
         if not _is_founder(interaction.user):
             await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
@@ -2168,6 +2168,343 @@ class FounderManageView(discord.ui.View):
         v = discord.ui.View(timeout=120)
         v.add_item(FounderTargetSelect("delete"))
         await interaction.response.send_message("Pilih channel/kategori yang mau dihapus:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Kelola Role", emoji="🏷️", style=discord.ButtonStyle.primary, custom_id="fnd_role", row=1)
+    async def manage_role_btn(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        await interaction.response.send_message("Pilih atau buat role baru:", view=FounderRoleHomeView(), ephemeral=True)
+
+    @discord.ui.button(label="Kirim Pesan", emoji="📢", style=discord.ButtonStyle.success, custom_id="fnd_announce", row=1)
+    async def announce_btn(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderAnnounceChannelSelect())
+        await interaction.response.send_message("Pilih channel tujuan pengiriman pesan:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Slowmode & Topik", emoji="🐢", style=discord.ButtonStyle.secondary, custom_id="fnd_ch_cfg", row=1)
+    async def ch_cfg_btn(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderConfigChannelSelect())
+        await interaction.response.send_message("Pilih channel teks yang mau diatur slowmode/topiknya:", view=v, ephemeral=True)
+
+
+class FounderCreateRoleModal(discord.ui.Modal, title="Buat Role Baru"):
+    nama = discord.ui.TextInput(label="Nama Role", placeholder="Contoh: ⭐ VIP", max_length=100, required=True)
+    warna = discord.ui.TextInput(label="Warna Hex (opsional)", default="#5865F2", max_length=10, required=False)
+    hoist = discord.ui.TextInput(label="Tampilkan Terpisah di Member List? (ya/tidak)", default="ya", max_length=10, required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        is_hoist = (self.hoist.value or "").strip().lower() in ("ya", "y", "yes", "true", "1")
+        r = await interaction.guild.create_role(
+            name=self.nama.value.strip()[:100],
+            colour=discord.Colour(color(self.warna.value)),
+            hoist=is_hoist,
+            mentionable=True,
+            reason=f"Founder Panel oleh {interaction.user}",
+        )
+        await interaction.response.send_message(f"✅ Role {r.mention} berhasil dibuat.", ephemeral=True)
+
+
+class FounderEditRoleModal(discord.ui.Modal, title="Edit Role"):
+    nama = discord.ui.TextInput(label="Nama Baru (kosongkan jika tetap)", required=False, max_length=100)
+    warna = discord.ui.TextInput(label="Warna Hex Baru (misal #FF5555, kosongkan jika tetap)", required=False, max_length=10)
+
+    def __init__(self, role):
+        super().__init__()
+        self.role = role
+
+    async def on_submit(self, interaction: discord.Interaction):
+        kw = {}
+        if self.nama.value.strip():
+            kw["name"] = self.nama.value.strip()[:100]
+        if self.warna.value.strip():
+            kw["colour"] = discord.Colour(color(self.warna.value))
+        if not kw:
+            await interaction.response.send_message("ℹ️ Tidak ada perubahan diisi.", ephemeral=True)
+            return
+        await self.role.edit(**kw, reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.send_message(f"✅ Role {self.role.mention} diperbarui.", ephemeral=True)
+
+
+class FounderRoleMemberSelect(discord.ui.UserSelect):
+    def __init__(self, role, give=True):
+        self.role = role
+        self.give = give
+        super().__init__(placeholder="Pilih member...", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        member = interaction.guild.get_member(self.values[0].id)
+        if not member:
+            await interaction.response.send_message("❌ Member tidak ditemukan.", ephemeral=True)
+            return
+        if self.give:
+            await member.add_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
+            await interaction.response.send_message(f"✅ Role {self.role.mention} diberikan ke {member.mention}.", ephemeral=True)
+        else:
+            await member.remove_roles(self.role, reason=f"Founder Panel oleh {interaction.user}")
+            await interaction.response.send_message(f"✅ Role {self.role.mention} dicabut dari {member.mention}.", ephemeral=True)
+
+
+class FounderRoleActionView(discord.ui.View):
+    def __init__(self, role):
+        super().__init__(timeout=180)
+        self.role = role
+
+    @discord.ui.button(label="Edit Nama/Warna", emoji="✏️", style=discord.ButtonStyle.primary)
+    async def edit_btn(self, interaction: discord.Interaction, _b):
+        await interaction.response.send_modal(FounderEditRoleModal(self.role))
+
+    @discord.ui.button(label="Pasang ke Member", emoji="➕", style=discord.ButtonStyle.success)
+    async def give_btn(self, interaction: discord.Interaction, _b):
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderRoleMemberSelect(self.role, give=True))
+        await interaction.response.send_message(f"Pilih member untuk diberi role {self.role.mention}:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Cabut dari Member", emoji="➖", style=discord.ButtonStyle.secondary)
+    async def remove_btn(self, interaction: discord.Interaction, _b):
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderRoleMemberSelect(self.role, give=False))
+        await interaction.response.send_message(f"Pilih member untuk dicabut role {self.role.mention}:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Hapus Role", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def del_btn(self, interaction: discord.Interaction, _b):
+        name = self.role.name
+        await self.role.delete(reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.edit_message(content=f"🗑️ Role **{name}** berhasil dihapus.", view=None)
+
+
+class FounderRoleSelect(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(placeholder="Pilih role yang mau dikelola...", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        role = interaction.guild.get_role(self.values[0].id)
+        if not role or role.is_default():
+            await interaction.response.send_message("❌ Role tidak bisa dikelola.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"⚙️ Kelola role {role.mention}:", view=FounderRoleActionView(role), ephemeral=True
+        )
+
+
+class FounderRoleHomeView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        self.add_item(FounderRoleSelect())
+
+    @discord.ui.button(label="Buat Role Baru", emoji="➕", style=discord.ButtonStyle.success)
+    async def create_role_btn(self, interaction: discord.Interaction, _b):
+        await interaction.response.send_modal(FounderCreateRoleModal())
+
+
+class FounderAnnounceModal(discord.ui.Modal, title="Kirim Pesan / Pengumuman"):
+    judul = discord.ui.TextInput(label="Judul Embed (kosongkan = teks biasa)", required=False, max_length=200)
+    isi = discord.ui.TextInput(label="Isi Pesan", style=discord.TextStyle.paragraph, required=True, max_length=2000)
+    tag_role = discord.ui.TextInput(label="Tag Role (opsional, misal: Member / everyone)", required=False, max_length=60)
+
+    def __init__(self, target_channel):
+        super().__init__()
+        self.target_channel = target_channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        mention_txt = ""
+        raw_tag = self.tag_role.value.strip()
+        if raw_tag:
+            if raw_tag.lower() in ("everyone", "@everyone"):
+                mention_txt = "@everyone"
+            else:
+                r = find_role(interaction.guild, raw_tag.lstrip("@"))
+                if r:
+                    mention_txt = r.mention
+        allowed = discord.AllowedMentions(everyone=True, roles=True)
+        if self.judul.value.strip():
+            e = discord.Embed(title=self.judul.value.strip(), description=self.isi.value, colour=BLURPLE)
+            e.set_footer(text=f"{interaction.guild.name}")
+            await self.target_channel.send(content=mention_txt or None, embed=e, allowed_mentions=allowed)
+        else:
+            text = f"{mention_txt}\n{self.isi.value}" if mention_txt else self.isi.value
+            await self.target_channel.send(text[:2000], allowed_mentions=allowed)
+        await interaction.response.send_message(f"✅ Pesan terkirim ke {self.target_channel.mention}.", ephemeral=True)
+
+
+class FounderAnnounceChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Pilih channel tujuan...",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        ch = interaction.guild.get_channel(self.values[0].id)
+        if not ch:
+            await interaction.response.send_message("❌ Channel tidak ditemukan.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FounderAnnounceModal(ch))
+
+
+class FounderChannelConfigModal(discord.ui.Modal, title="Atur Slowmode & Topik Channel"):
+    slowmode = discord.ui.TextInput(label="Slowmode dalam detik (0 = mati, maks 21600)", required=False, max_length=6)
+    topik = discord.ui.TextInput(label="Topik / Deskripsi Channel (opsional)", style=discord.TextStyle.paragraph, required=False, max_length=500)
+
+    def __init__(self, target_channel):
+        super().__init__()
+        self.target_channel = target_channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        kw = {}
+        if self.slowmode.value.strip().isdigit():
+            kw["slowmode_delay"] = max(0, min(21600, int(self.slowmode.value.strip())))
+        if self.topik.value.strip():
+            kw["topic"] = self.topik.value.strip()
+        if not kw:
+            await interaction.response.send_message("ℹ️ Tidak ada perubahan diisi.", ephemeral=True)
+            return
+        await self.target_channel.edit(**kw, reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.send_message(f"✅ Pengaturan {self.target_channel.mention} diperbarui.", ephemeral=True)
+
+
+class FounderConfigChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Pilih channel teks...",
+            channel_types=[discord.ChannelType.text],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        ch = interaction.guild.get_channel(self.values[0].id)
+        if not ch:
+            await interaction.response.send_message("❌ Channel tidak ditemukan.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FounderChannelConfigModal(ch))
+
+
+# --- Giveaway (/giveaway) -------------------------------------------------
+GIVEAWAYS = {}
+
+
+def _giveaway_embed(gw):
+    ended = gw.get("ended", False)
+    title = "🎉 ╎ GIVEAWAY SELESAI" if ended else "🎉 ╎ GIVEAWAY"
+    status_line = (
+        f"🏆 **Pemenang:** {gw.get('winners_text', '-')}"
+        if ended
+        else f"⏰ **Berakhir:** <t:{gw['end_ts']}:R>\n👥 **Peserta:** `{len(gw['participants'])}` orang"
+    )
+    e = discord.Embed(
+        title=title,
+        description=f"🎁 **Hadiah:** {gw['prize']}\n👑 **Pemenang:** `{gw['winners_count']}` orang\n{status_line}",
+        colour=GREEN if not ended else GOLD,
+    )
+    e.set_footer(text=f"Diselenggarakan oleh {gw['host_name']}")
+    return e
+
+
+async def _end_giveaway(guild, channel, msg_id):
+    gw = GIVEAWAYS.get(msg_id)
+    if not gw or gw.get("ended"):
+        return
+    gw["ended"] = True
+    pool = list(gw["participants"])
+    count = min(gw["winners_count"], len(pool))
+    winners = _rng.sample(pool, count) if count > 0 else []
+    gw["winners_text"] = ", ".join(f"<@{uid}>" for uid in winners) if winners else "_Tidak ada peserta_"
+    try:
+        msg = await channel.fetch_message(msg_id)
+        await msg.edit(embed=_giveaway_embed(gw), view=None)
+    except Exception:
+        pass
+    if winners:
+        await channel.send(f"🎊 Selamat {gw['winners_text']}! Kamu memenangkan **{gw['prize']}**!")
+    else:
+        await channel.send(f"😢 Giveaway **{gw['prize']}** berakhir tanpa peserta.")
+
+
+async def _finish_giveaway_after(guild, channel, msg_id, delay):
+    await asyncio.sleep(max(1, delay))
+    await _end_giveaway(guild, channel, msg_id)
+
+
+class GiveawayView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Ikut Giveaway", emoji="🎉", style=discord.ButtonStyle.success, custom_id="gw_join")
+    async def join_btn(self, interaction: discord.Interaction, _b):
+        gw = GIVEAWAYS.get(interaction.message.id)
+        if not gw or gw.get("ended"):
+            await interaction.response.send_message("❌ Giveaway ini sudah berakhir atau data restart.", ephemeral=True)
+            return
+        uid = interaction.user.id
+        if uid in gw["participants"]:
+            gw["participants"].remove(uid)
+            msg_txt = "ℹ️ Kamu keluar dari giveaway ini."
+        else:
+            gw["participants"].add(uid)
+            msg_txt = f"✅ Kamu berhasil ikut giveaway **{gw['prize']}**! Total peserta: `{len(gw['participants'])}`."
+        try:
+            await interaction.message.edit(embed=_giveaway_embed(gw), view=self)
+        except Exception:
+            pass
+        await interaction.response.send_message(msg_txt, ephemeral=True)
+
+    @discord.ui.button(label="Akhiri Sekarang", emoji="🏁", style=discord.ButtonStyle.secondary, custom_id="gw_end")
+    async def end_btn(self, interaction: discord.Interaction, _b):
+        gw = GIVEAWAYS.get(interaction.message.id)
+        if not gw or gw.get("ended"):
+            await interaction.response.send_message("❌ Giveaway sudah berakhir.", ephemeral=True)
+            return
+        if interaction.user.id != gw["host_id"] and not _has_mod_perm(interaction.user, "manage_guild"):
+            await interaction.response.send_message("❌ Hanya host/staff yang bisa mengakhiri giveaway.", ephemeral=True)
+            return
+        await interaction.response.send_message("🏁 Mengakhiri giveaway & mengundi pemenang...", ephemeral=True)
+        await _end_giveaway(interaction.guild, interaction.channel, interaction.message.id)
+
+
+@tree.command(name="giveaway", description="Buat giveaway dengan tombol ikut & undian otomatis", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(
+    hadiah="Nama hadiah giveaway",
+    durasi_menit="Durasi giveaway dalam menit (1 - 10080)",
+    pemenang="Jumlah pemenang (default: 1)",
+    channel="Channel tujuan (opsional, default channel ini)",
+)
+async def slash_giveaway(
+    interaction: discord.Interaction,
+    hadiah: str,
+    durasi_menit: int,
+    pemenang: int = 1,
+    channel: discord.TextChannel = None,
+):
+    if not _has_mod_perm(interaction.user, "manage_guild"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin membuat giveaway.", ephemeral=True)
+        return
+    dur = max(1, min(10080, durasi_menit))
+    win_cnt = max(1, min(20, pemenang))
+    ch = channel or interaction.channel
+    end_ts = int(time.time()) + dur * 60
+    gw = {
+        "prize": hadiah[:200],
+        "winners_count": win_cnt,
+        "end_ts": end_ts,
+        "host_id": interaction.user.id,
+        "host_name": interaction.user.display_name,
+        "participants": set(),
+        "ended": False,
+    }
+    msg = await ch.send(embed=_giveaway_embed(gw), view=GiveawayView())
+    GIVEAWAYS[msg.id] = gw
+    client.loop.create_task(_finish_giveaway_after(interaction.guild, ch, msg.id, dur * 60))
+    await interaction.response.send_message(f"🎉 Giveaway **{hadiah}** dibuat di {ch.mention} (berakhir <t:{end_ts}:R>).", ephemeral=True)
 
 
 async def _ensure_founder_panel():
@@ -2191,26 +2528,31 @@ async def _ensure_founder_panel():
                 topic="Panel manajemen channel & kategori khusus Founder",
                 reason="Setup channel khusus Founder",
             )
-        has_panel = False
+        panel_embed = discord.Embed(
+            title=FOUNDER_PANEL_TITLE,
+            description=(
+                "Gunakan tombol di bawah untuk mengelola server secara langsung:\n"
+                "• **📁 Buat Kategori** — Tambah kategori baru (publik/privat)\n"
+                "• **💬 Buat Channel** — Tambah channel teks/voice baru\n"
+                "• **✏️ Ganti Nama** — Ubah nama channel atau kategori\n"
+                "• **🔒 Ubah Permission** — Lock, Unlock, Private, Public, atau Pindah Kategori\n"
+                "• **🗑️ Hapus** — Hapus channel atau kategori (dengan konfirmasi)\n"
+                "• **🏷️ Kelola Role** — Buat, edit, hapus, atau pasang/cabut role member\n"
+                "• **📢 Kirim Pesan** — Kirim pengumuman/embed/teks custom ke channel\n"
+                "• **🐢 Slowmode & Topik** — Atur jeda chat & deskripsi channel"
+            ),
+            colour=GOLD,
+        )
+        panel_embed.set_footer(text="Akses terbatas: khusus Owner & Role Founder")
+        panel_msg = None
         async for m in ch.history(limit=10):
             if m.author == client.user and m.embeds and m.embeds[0].title == FOUNDER_PANEL_TITLE:
-                has_panel = True
+                panel_msg = m
                 break
-        if not has_panel:
-            e = discord.Embed(
-                title=FOUNDER_PANEL_TITLE,
-                description=(
-                    "Gunakan tombol di bawah untuk mengelola server secara langsung:\n"
-                    "• **📁 Buat Kategori** — Tambah kategori baru (publik/privat)\n"
-                    "• **💬 Buat Channel** — Tambah channel teks/voice baru\n"
-                    "• **✏️ Ganti Nama** — Ubah nama channel atau kategori\n"
-                    "• **🔒 Ubah Permission** — Lock, Unlock, Private, Public, atau Pindah Kategori\n"
-                    "• **🗑️ Hapus** — Hapus channel atau kategori (dengan konfirmasi)"
-                ),
-                colour=GOLD,
-            )
-            e.set_footer(text="Akses terbatas: khusus Owner & Role Founder")
-            await ch.send(embed=e, view=FounderManageView())
+        if panel_msg:
+            await panel_msg.edit(embed=panel_embed, view=FounderManageView())
+        else:
+            await ch.send(embed=panel_embed, view=FounderManageView())
     except Exception as exc:
         log("ensure founder panel error:", exc)
 
@@ -2224,6 +2566,7 @@ async def on_ready():
     client.add_view(LofiView())
     client.add_view(NextMusicView())
     client.add_view(FounderManageView())
+    client.add_view(GiveawayView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
