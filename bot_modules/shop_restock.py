@@ -99,6 +99,32 @@ def _init_db_sync():
             """
         )
         conn.execute("INSERT OR IGNORE INTO shop_config (key, value) VALUES ('webhook_enabled', '1')")
+        cnt = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+        if cnt == 0:
+            default_items = [
+                ("🎨 ╎ Ruby Red",        250,  10, "premium",   5.0,  "Warna nama merah eksklusif"),
+                ("🥉 ╎ Bronze Member",   350,  10, "premium",   5.0,  "Badge Bronze + warna khusus"),
+                ("💎 ╎ Cyan Diamond",    400,  8,  "premium",   5.0,  "Warna cyan + akses #premium-chat"),
+                ("⚡ ╎ Gold Rush",       600,  8,  "premium",   5.0,  "Warna emas + akses #VIP Lounge"),
+                ("🥈 ╎ Silver Member",   650,  8,  "premium",   5.0,  "Badge Silver + akses #premium-chat"),
+                ("👑 ╎ Sultan DEV",      1000, 5,  "elite",     3.0,  "Warna ungu + #sultan-lounge + bonus bulanan"),
+                ("🥇 ╎ Gold Member",     1000, 5,  "elite",     3.0,  "Badge Gold + akses VIP Lounge"),
+                ("🌟 ╎ Early Supporter", 1200, 5,  "elite",     3.0,  "Badge Early Supporter + bonus bulanan"),
+                ("💠 ╎ Diamond Member",  1500, 4,  "mythic",    1.0,  "Badge Diamond + VIP & bonus bulanan"),
+                ("🔥 ╎ OG Member",       1600, 4,  "mythic",    1.0,  "Badge OG + akses VIP & #premium-chat"),
+                ("💻 ╎ Developer",       1800, 4,  "mythic",    1.0,  "Akses #sultan-lounge + bonus bulanan"),
+                ("🏆 ╎ Top Supporter",   2000, 3,  "legendary", 0.5,  "Badge Top Supporter + bonus bulanan"),
+                ("🔮 ╎ Mythic Member",   2200, 3,  "legendary", 0.5,  "Badge Mythic + VIP & bonus bulanan"),
+                ("🛡️ ╎ Guardian",        2800, 3,  "legendary", 0.5,  "Badge Guardian + #sultan-lounge"),
+                ("🌌 ╎ Galaxy Member",   3000, 2,  "divine",    0.1,  "Badge Galaxy + #sultan-lounge"),
+                ("🐉 ╎ Dragon Lord",     4000, 2,  "divine",    0.1,  "Badge Dragon + prioritas event"),
+                ("💫 ╎ Legendary",       4500, 2,  "divine",    0.1,  "Badge Legendary + semua lounge"),
+                ("☄️ ╎ Cosmic Legend",   5500, 1,  "special",   0.01, "Badge Legend + akses semua lounge premium"),
+            ]
+            conn.executemany(
+                "INSERT INTO products (name, price, stock, rarity, rarity_percent, description, image_url) VALUES (?, ?, ?, ?, ?, ?, '')",
+                default_items,
+            )
         conn.commit()
 
 

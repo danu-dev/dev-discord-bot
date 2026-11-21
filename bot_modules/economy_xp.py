@@ -480,7 +480,13 @@ class ShopProductSelect(discord.ui.Select):
             return
         old_stock = int(prod["stock"])
         new_stock = old_stock - 1
+        role = find_role(interaction.guild, prod["name"])
+        if role and role in interaction.user.roles:
+            await interaction.response.send_message(f"ℹ️ Kamu sudah memiliki role {role.mention}.", ephemeral=True)
+            return
         _add_coins(interaction.user.id, -price)
+        if role:
+            await interaction.user.add_roles(role, reason=f"Dibeli di /ekonomi shop seharga {price} Koin")
         inv = ECONOMY_DATA.setdefault("inventory", {}).setdefault(str(interaction.user.id), [])
         inv.append(prod["name"])
         _save_economy()
@@ -491,8 +497,9 @@ class ShopProductSelect(discord.ui.Select):
         )
         if new_stock == 0:
             await _send_restock_webhook(updated, "OUT_OF_STOCK", old_stock, 0)
+        extra = f" & role {role.mention} dipasang" if role else ""
         await interaction.response.send_message(
-            f"🎉 Berhasil membeli **{updated['name']}** seharga **{price:,} Koin**!\nSisa stok: **{new_stock}** • Sisa koin: **{_get_coins(interaction.user.id):,}**.",
+            f"🎉 Berhasil membeli **{updated['name']}**{extra} seharga **{price:,} Koin**!\nSisa stok: **{new_stock}** • Sisa koin: **{_get_coins(interaction.user.id):,}**.",
             ephemeral=True,
         )
 
@@ -500,9 +507,6 @@ class ShopProductSelect(discord.ui.Select):
 class ShopView(discord.ui.View):
     def __init__(self, products=None):
         super().__init__(timeout=None)
-        self.add_item(ShopRoleSelect(SHOP_COLOR_ROLES, "🎨 Pilih Color Role...", "shop_color_select"))
-        self.add_item(ShopRoleSelect(SHOP_PREMIUM_ROLES, "💎 Pilih Premium Role...", "shop_premium_select"))
-        self.add_item(ShopRoleSelect(SHOP_SPECIAL_ROLES, "👑 Pilih Special Collection...", "shop_special_select"))
         self.add_item(ShopProductSelect(products))
 
 
@@ -527,23 +531,19 @@ async def slash_shop(interaction: discord.Interaction):
     bal = _get_coins(interaction.user.id)
     all_prods = await _db_run(_list_products_sync)
     in_stock = [p for p in all_prods if p["stock"] > 0]
-    fmt = lambda items: "\n".join(f"• **{name}** — `{price} Koin` ({desc})" for _k, name, _c, price, desc in items)
     e = discord.Embed(
-        title="🛒 ╎ Toko Role & Produk",
-        description=f"Saldo kamu: **🪙 {bal} Koin**\nPemilik role Premium/Special bisa klaim bonus bulanan lewat `/ekonomi bulanan`.",
+        title="🛒 ╎ Toko Server",
+        description=f"Saldo kamu: **🪙 {bal:,} Koin**\nPilih item di menu bawah untuk membeli. Pemilik role Premium/Special bisa klaim `/ekonomi bulanan`.",
         colour=BLURPLE,
     )
-    e.add_field(name="🎨 Color Roles", value=fmt(SHOP_COLOR_ROLES), inline=False)
-    e.add_field(name="💎 Premium Roles", value=fmt(SHOP_PREMIUM_ROLES), inline=False)
-    e.add_field(name="👑 Special Collection", value=fmt(SHOP_SPECIAL_ROLES), inline=False)
     if in_stock:
-        prod_lines = "\n".join(
-            f"• {RARITIES[p['rarity']]['emoji']} **{p['name']}** (`{p['rarity_percent']}%`) — `{p['price']:,} Koin` (Stok: **{p['stock']}**)"
-            for p in in_stock[:15]
-        )
+        lines = [
+            f"• {RARITIES[p['rarity']]['emoji']} **{p['name']}** (`{p['rarity_percent']}%`) — `{p['price']:,} Koin` • Stok: **{p['stock']}**\n  _{p['description'] or '-'}_"
+            for p in in_stock[:20]
+        ]
+        e.add_field(name="📦 Stok Tersedia", value="\n".join(lines)[:1024], inline=False)
     else:
-        prod_lines = "_Belum ada produk yang tersedia saat ini._"
-    e.add_field(name="📦 Produk Restock (Stok Tersedia)", value=prod_lines, inline=False)
+        e.add_field(name="📦 Stok Tersedia", value="_Semua stok sedang habis. Tunggu restock dari admin!_", inline=False)
     await interaction.response.send_message(embed=e, view=ShopView(in_stock), ephemeral=True)
 
 
