@@ -213,3 +213,18 @@ async def slash_panel_verify(interaction: discord.Interaction, channel: discord.
         f"✅ Panel verifikasi dikirim ke {ch.mention} dan mode verifikasi tombol sekarang **AKTIF**.",
         ephemeral=True,
     )
+
+
+async def _ensure_verify_panel(guild):
+    if not guild or not is_verify_enabled():
+        return
+    v_ch = discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "verify" in c.name.lower(), guild.channels)
+    if not v_ch:
+        return
+    try:
+        async for m in v_ch.history(limit=20):
+            if m.author == client.user and m.embeds and "VERIFIKASI MEMBER" in (m.embeds[0].title or ""):
+                return
+        await v_ch.send(embed=verify_panel_embed(guild), view=VerifyView())
+    except Exception as exc:
+        log("ensure verify panel error:", exc)

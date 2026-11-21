@@ -23,6 +23,7 @@ from bot_modules.founder_panel import FounderManageView, _ensure_founder_panel
 from bot_modules.welcome import (
     VERIFY_CONFIG, _save_verify_config, is_verify_enabled,
     build_welcome_card, welcome_embed, VerifyView, verify_panel_embed, RULES_CHANNEL_ID,
+    _ensure_verify_panel,
 )
 
 
@@ -214,6 +215,7 @@ async def on_ready():
         if guild:
             await _refresh_invites(guild)
             await _update_server_counters(guild)
+            await _ensure_verify_panel(guild)
         await _ensure_founder_panel()
         client.loop.create_task(background_qa_and_autorole())
     log(f"online sebagai {client.user} — melayani owner {OWNER_ID} di #commands")
@@ -260,6 +262,16 @@ async def on_member_join(member):
     if ch:
         card_buf = await build_welcome_card(member)
         await ch.send(embed=welcome_embed(member), file=discord.File(card_buf, filename="welcome.png"))
+    if is_verify_enabled():
+        v_ch = discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "verify" in c.name.lower(), member.guild.channels)
+        if v_ch:
+            try:
+                await v_ch.send(
+                    f"👋 {member.mention}, silakan klik tombol **✅ Saya Setuju Rules & Verifikasi** di atas untuk membuka akses server!",
+                    delete_after=60,
+                )
+            except Exception:
+                pass
 
 
 @client.event
