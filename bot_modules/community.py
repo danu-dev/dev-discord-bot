@@ -40,6 +40,7 @@ def _help_embed(member):
             name="🛡️ Staff & Owner",
             value="`/mod ban` • `/mod unban` • `/mod kick` • `/mod timeout` • `/mod purge`\n"
                   "`/rank setlevel` • `/ekonomi give` • `/panel-verify`\n"
+                  "`/product_add` • `/product_edit` • `/product_delete` • `/restock` • `/stock_set` • `/shop_list` • `/stock_history` • `/shop_config`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!panel-verify` • `!test-welcome` • `!reset` • Mention bot untuk AI",
             inline=False,
         )

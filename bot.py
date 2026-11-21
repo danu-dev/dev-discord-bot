@@ -25,6 +25,7 @@ from bot_modules.welcome import (
     build_welcome_card, welcome_embed, VerifyView, verify_panel_embed, RULES_CHANNEL_ID,
     _ensure_verify_panel,
 )
+import bot_modules.shop_restock  # noqa: F401 — registers SHOP RESTOCK SYSTEM commands & SQLite DB
 
 
 @client.event
