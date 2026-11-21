@@ -962,6 +962,31 @@ async def slash_setlevel(interaction: discord.Interaction, member: discord.Membe
 
 
 _rng = random.SystemRandom()
+GAME_COOLDOWN = {}  # (user_id, game) -> last_timestamp
+GAME_CD_SECONDS = 15
+
+
+def _check_game_cd(user_id, game):
+    now = time.time()
+    key = (user_id, game)
+    left = GAME_CD_SECONDS - (now - GAME_COOLDOWN.get(key, 0))
+    if left > 0:
+        return int(left) + 1
+    GAME_COOLDOWN[key] = now
+    return 0
+
+
+async def _grant_bonus_xp(guild, member, amount):
+    uid = str(member.id)
+    old_xp = XP_DATA.get(uid, 0)
+    new_xp = old_xp + amount
+    XP_DATA[uid] = new_xp
+    _save_xp()
+    old_lvl, new_lvl = _xp_level(old_xp), _xp_level(new_xp)
+    if new_lvl > old_lvl:
+        rank_label = await _sync_ml_role(guild, member, new_lvl)
+        return f"\n🎉 Naik ke **Level {new_lvl}** ({rank_label})!"
+    return ""
 
 
 @tree.command(name="suit", description="Main Batu Gunting Kertas lawan bot", guild=discord.Object(id=GUILD_ID))
@@ -971,6 +996,10 @@ _rng = random.SystemRandom()
     discord.app_commands.Choice(name="📄 Kertas", value="kertas"),
 ])
 async def slash_suit(interaction: discord.Interaction, pilihan: discord.app_commands.Choice[str]):
+    wait = _check_game_cd(interaction.user.id, "suit")
+    if wait:
+        await interaction.response.send_message(f"⏳ Jangan spam! Tunggu **{wait} detik** lagi buat `/suit`.", ephemeral=True)
+        return
     bot_pick = _rng.choice(["batu", "gunting", "kertas"])
     icons = {"batu": "🪨 Batu", "gunting": "✂️ Gunting", "kertas": "📄 Kertas"}
     wins = {("batu", "gunting"), ("gunting", "kertas"), ("kertas", "batu")}
@@ -979,10 +1008,8 @@ async def slash_suit(interaction: discord.Interaction, pilihan: discord.app_comm
         res = "🤝 **Seri!**"
     elif (user_val, bot_pick) in wins:
         bonus = _rng.randint(8, 25)
-        uid = str(interaction.user.id)
-        XP_DATA[uid] = XP_DATA.get(uid, 0) + bonus
-        _save_xp()
-        res = f"🎉 **Kamu Menang!** (+{bonus} XP)"
+        lvl_msg = await _grant_bonus_xp(interaction.guild, interaction.user, bonus)
+        res = f"🎉 **Kamu Menang!** (+{bonus} XP){lvl_msg}"
     else:
         res = "😈 **Bot Menang!** Coba lagi!"
     await interaction.response.send_message(f"Kamu: {icons[user_val]} vs Bot: {icons[bot_pick]}\n{res}")
@@ -994,6 +1021,10 @@ async def slash_suit(interaction: discord.Interaction, pilihan: discord.app_comm
     discord.app_commands.Choice(name="🦅 Ekor", value="ekor"),
 ])
 async def slash_coinflip(interaction: discord.Interaction, tebak: discord.app_commands.Choice[str] = None):
+    wait = _check_game_cd(interaction.user.id, "coinflip")
+    if wait:
+        await interaction.response.send_message(f"⏳ Jangan spam! Tunggu **{wait} detik** lagi buat `/coinflip`.", ephemeral=True)
+        return
     hasil = _rng.choice(["kepala", "ekor"])
     label = "🪙 Kepala" if hasil == "kepala" else "🦅 Ekor"
     if not tebak:
@@ -1001,10 +1032,8 @@ async def slash_coinflip(interaction: discord.Interaction, tebak: discord.app_co
         return
     if tebak.value == hasil:
         bonus = _rng.randint(8, 25)
-        uid = str(interaction.user.id)
-        XP_DATA[uid] = XP_DATA.get(uid, 0) + bonus
-        _save_xp()
-        await interaction.response.send_message(f"Hasil: **{label}** — 🎉 **Tebakanmu benar!** (+{bonus} XP)")
+        lvl_msg = await _grant_bonus_xp(interaction.guild, interaction.user, bonus)
+        await interaction.response.send_message(f"Hasil: **{label}** — 🎉 **Tebakanmu benar!** (+{bonus} XP){lvl_msg}")
     else:
         await interaction.response.send_message(f"Hasil: **{label}** — 😅 Meleset!")
 
@@ -1015,13 +1044,15 @@ async def slash_tebakangka(interaction: discord.Interaction, angka: int):
     if not 1 <= angka <= 10:
         await interaction.response.send_message("❌ Pilih angka antara **1 sampai 10**!", ephemeral=True)
         return
+    wait = _check_game_cd(interaction.user.id, "tebakangka")
+    if wait:
+        await interaction.response.send_message(f"⏳ Jangan spam! Tunggu **{wait} detik** lagi buat `/tebakangka`.", ephemeral=True)
+        return
     rahasia = _rng.randint(1, 10)
     if angka == rahasia:
         bonus = _rng.randint(20, 50)
-        uid = str(interaction.user.id)
-        XP_DATA[uid] = XP_DATA.get(uid, 0) + bonus
-        _save_xp()
-        await interaction.response.send_message(f"🎯 Tepat banget! Angkanya **{rahasia}**! 🎉 (+{bonus} XP)")
+        lvl_msg = await _grant_bonus_xp(interaction.guild, interaction.user, bonus)
+        await interaction.response.send_message(f"🎯 Tepat banget! Angkanya **{rahasia}**! 🎉 (+{bonus} XP){lvl_msg}")
     else:
         await interaction.response.send_message(f"❌ Kamu tebak **{angka}**, padahal angkanya **{rahasia}**!")
 
