@@ -271,15 +271,19 @@ async def slash_daily(interaction: discord.Interaction):
 @tree.command(name="confess", description="Kirim pesan anonim ke #🤫╎confess", guild=discord.Object(id=GUILD_ID))
 @discord.app_commands.describe(pesan="Pesan atau curhatan anonim kamu")
 async def slash_confess(interaction: discord.Interaction, pesan: str):
-    ch = interaction.guild.get_channel(CONFESS_CHANNEL)
+    await interaction.response.defer(ephemeral=True)
+    ch = interaction.guild.get_channel(CONFESS_CHANNEL) or discord.utils.find(
+        lambda c: isinstance(c, discord.TextChannel) and "confess" in c.name.lower(),
+        interaction.guild.channels,
+    )
     if not ch:
-        await interaction.response.send_message("❌ Channel confess tidak ditemukan.", ephemeral=True)
+        await interaction.followup.send("❌ Channel confess tidak ditemukan.", ephemeral=True)
         return
     e = discord.Embed(title="🤫 ╎ Confess Anonim", description=pesan[:2000], colour=0x9B59B6)
     e.set_footer(text="Gunakan /confess untuk mengirim pesan anonim")
     await ch.send(embed=e)
     await _send_modlog(interaction.guild, "🤫 Confess Masuk", f"Pengirim: {interaction.user.mention} (`{interaction.user.id}`)\nIsi: {pesan[:500]}", 0x9B59B6)
-    await interaction.response.send_message(f"✅ Confess kamu sudah dikirim secara anonim ke {ch.mention}!", ephemeral=True)
+    await interaction.followup.send(f"✅ Confess kamu sudah dikirim secara anonim ke {ch.mention}!", ephemeral=True)
 
 
 @tree.command(name="tebakangka", description="Tebak angka 1 sampai 10", guild=discord.Object(id=GUILD_ID))
