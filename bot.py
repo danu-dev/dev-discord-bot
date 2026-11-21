@@ -896,6 +896,104 @@ async def slash_leaderboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_leaderboard_embed(interaction.guild))
 
 
+async def _sync_ml_role(guild, member, lvl):
+    rank_label, target_rid = _ml_rank_for_level(lvl)
+    if not target_rid:
+        return rank_label
+    ml_ids = {rid for _, _, rid in ML_RANK_TIERS}
+    old_roles = [r for r in member.roles if r.id in ml_ids and r.id != target_rid]
+    new_role = guild.get_role(target_rid)
+    try:
+        if old_roles:
+            await member.remove_roles(*old_roles, reason=f"Sync rank {rank_label}")
+        if new_role and new_role not in member.roles:
+            await member.add_roles(new_role, reason=f"Sync rank {rank_label}")
+    except Exception:
+        pass
+    return rank_label
+
+
+@tree.command(name="ranks", description="Lihat daftar semua tier Rank ML berdasarkan level", guild=discord.Object(id=GUILD_ID))
+async def slash_ranks(interaction: discord.Interaction):
+    lines = [f"• **Level {req}** → **{name}**" for req, name, _ in ML_RANK_TIERS]
+    lines.append("• **Level 30+** → **⚡ ╎ Mythical Immortal ★1, ★2, ★3, ...** *(terus naik setiap level!)*")
+    e = discord.Embed(title="🏅 ╎ Daftar Rank ML Server", description="\n".join(lines), colour=GOLD)
+    e.set_footer(text="Rajin ngobrol atau main mini-game buat naik level!")
+    await interaction.response.send_message(embed=e)
+
+
+@tree.command(name="setlevel", description="Atur level member & sync rank ML (khusus Owner)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(member="Member target", level="Level target (0-200)")
+async def slash_setlevel(interaction: discord.Interaction, member: discord.Member, level: int):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("❌ Command ini khusus Owner.", ephemeral=True)
+        return
+    lvl = max(0, min(200, level))
+    XP_DATA[str(member.id)] = lvl * lvl * 100
+    _save_xp()
+    rank_label = await _sync_ml_role(interaction.guild, member, lvl)
+    await interaction.response.send_message(f"✅ Level {member.mention} diatur ke **Level {lvl}** ({rank_label}).")
+
+
+@tree.command(name="suit", description="Main Batu Gunting Kertas lawan bot", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.choices(pilihan=[
+    discord.app_commands.Choice(name="🪨 Batu", value="batu"),
+    discord.app_commands.Choice(name="✂️ Gunting", value="gunting"),
+    discord.app_commands.Choice(name="📄 Kertas", value="kertas"),
+])
+async def slash_suit(interaction: discord.Interaction, pilihan: discord.app_commands.Choice[str]):
+    bot_pick = random.choice(["batu", "gunting", "kertas"])
+    icons = {"batu": "🪨 Batu", "gunting": "✂️ Gunting", "kertas": "📄 Kertas"}
+    wins = {("batu", "gunting"), ("gunting", "kertas"), ("kertas", "batu")}
+    user_val = pilihan.value
+    if user_val == bot_pick:
+        res = "🤝 **Seri!**"
+    elif (user_val, bot_pick) in wins:
+        uid = str(interaction.user.id)
+        XP_DATA[uid] = XP_DATA.get(uid, 0) + 10
+        _save_xp()
+        res = "🎉 **Kamu Menang!** (+10 XP)"
+    else:
+        res = "😈 **Bot Menang!** Coba lagi!"
+    await interaction.response.send_message(f"Kamu: {icons[user_val]} vs Bot: {icons[bot_pick]}\n{res}")
+
+
+@tree.command(name="coinflip", description="Lempar koin (Kepala / Ekor)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.choices(tebak=[
+    discord.app_commands.Choice(name="🪙 Kepala", value="kepala"),
+    discord.app_commands.Choice(name="🦅 Ekor", value="ekor"),
+])
+async def slash_coinflip(interaction: discord.Interaction, tebak: discord.app_commands.Choice[str] = None):
+    hasil = random.choice(["kepala", "ekor"])
+    label = "🪙 Kepala" if hasil == "kepala" else "🦅 Ekor"
+    if not tebak:
+        await interaction.response.send_message(f"Hasil lempar koin: **{label}**!")
+        return
+    if tebak.value == hasil:
+        uid = str(interaction.user.id)
+        XP_DATA[uid] = XP_DATA.get(uid, 0) + 10
+        _save_xp()
+        await interaction.response.send_message(f"Hasil: **{label}** — 🎉 **Tebakanmu benar!** (+10 XP)")
+    else:
+        await interaction.response.send_message(f"Hasil: **{label}** — 😅 Meleset!")
+
+
+@tree.command(name="tebakangka", description="Tebak angka 1 sampai 10", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(angka="Pilih angka 1 - 10")
+async def slash_tebakangka(interaction: discord.Interaction, angka: int):
+    if not 1 <= angka <= 10:
+        await interaction.response.send_message("❌ Pilih angka antara **1 sampai 10**!", ephemeral=True)
+        return
+    rahasia = random.randint(1, 10)
+    if angka == rahasia:
+        uid = str(interaction.user.id)
+        XP_DATA[uid] = XP_DATA.get(uid, 0) + 25
+        _save_xp()
+        await interaction.response.send_message(f"🎯 Tepat banget! Angkanya **{rahasia}**! 🎉 (+25 XP)")
+    else:
+        await interaction.response.send_message(f"❌ Kamu tebak **{angka}**, padahal angkanya **{rahasia}**!")
+
+
 def _has_mod_perm(member, perm_name):
     return member.id == OWNER_ID or getattr(member.guild_permissions, perm_name, False) or member.guild_permissions.administrator
 
@@ -1749,7 +1847,7 @@ async def on_message(msg):
             await msg.reply(f"✅ Panel pilih role dikirim ke {w.mention}.", mention_author=False)
         return
     if low == "!panel-ticket":
-        g = guild.get_channel(1572712078295437413) or msg.channel
+        g = guild.get_channel(1573532365970481263) or msg.channel
         e = discord.Embed(
             title="🎫 ╎ BANTUAN & TICKET SUPPORT",
             description="Butuh bantuan staff, lapor masalah, atau ada keperluan khusus?\n"
