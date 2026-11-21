@@ -548,8 +548,8 @@ class BlackjackView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 
-@tree.command(name="blackjack", description="Main Blackjack pakai Koin (menang 2x, Blackjack 2.5x!)", guild=discord.Object(id=GUILD_ID))
-@discord.app_commands.describe(taruhan="Jumlah koin yang dipertaruhkan (10 - 5000)")
+@tree.command(name="blackjack", description="Main Blackjack pakai koin", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(taruhan="Jumlah taruhan (10 - 5000 koin)")
 async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
     if not 10 <= taruhan <= 5000:
         await interaction.response.send_message("❌ Taruhan harus antara **10 sampai 5000 Koin**.", ephemeral=True)
@@ -587,10 +587,10 @@ async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
     await interaction.response.send_message(embed=view._embed("Pilih **Hit**, **Stand**, atau **Double Down**:"), view=view)
 
 
-@tree.command(name="roulette", description="Putar Roulette pakai Koin (merah/hitam/genap/ganjil/1-18/19-36/angka 0-36)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="roulette", description="Main Roulette pakai koin", guild=discord.Object(id=GUILD_ID))
 @discord.app_commands.describe(
-    taruhan="Jumlah koin yang dipertaruhkan (10 - 5000)",
-    pilihan="Pilih: merah, hitam, genap, ganjil, 1-18, 19-36, hijau, atau angka 0-36",
+    taruhan="Jumlah taruhan (10 - 5000 koin)",
+    pilihan="merah, hitam, genap, ganjil, 1-18, 19-36, hijau, atau 0-36",
 )
 async def slash_roulette(interaction: discord.Interaction, taruhan: int, pilihan: str):
     if not 10 <= taruhan <= 5000:
@@ -657,31 +657,32 @@ async def slash_roulette(interaction: discord.Interaction, taruhan: int, pilihan
         description=f"Bola berhenti di: {color_emoji} **{num} ({color_name})**\nPilihanmu: **`{pilihan}`** • Taruhan: **{taruhan} Koin**\n\n{res_txt}",
         colour=col,
     )
-    e.set_footer(text=f"Saldo sekarang: {_get_coins(interaction.user.id)} Koin • Beli role di /shop!")
+    e.set_footer(text=f"Saldo: {_get_coins(interaction.user.id)} Koin")
     await interaction.response.send_message(embed=e)
 
 
 WORK_CD_SECONDS = 300  # 5 menit cooldown
 _WORK_JOBS = [
-    ("🎮 Joki Rank ML", 45, 95),
-    ("🎥 Streamer Gaming", 40, 110),
-    ("🎬 Editor Clip Mabar", 35, 85),
-    ("🛠️ Teknisi Rakit PC", 50, 100),
-    ("🎙️ Caster Turnamen", 55, 115),
-    ("🐛 Bug Hunter Bot", 40, 90),
-    ("🎧 DJ Radio Lounge", 35, 80),
+    ("Joki Rank ML", 35, 85),
+    ("Streamer Gaming", 30, 95),
+    ("Editor Clip Mabar", 30, 80),
+    ("Rakit PC", 45, 95),
+    ("Caster Turnamen", 50, 105),
+    ("Benerin Bug Bot", 35, 85),
+    ("DJ Lounge", 30, 75),
 ]
 _WORK_JACKPOTS = [
-    ("🏆 Juara Mini Turnamen", 130, 200),
-    ("💸 Dapet Donasi Sultan pas Live", 120, 180),
+    ("Juara Mini Turnamen", 120, 180),
+    ("Dapet Donasi pas Live", 110, 165),
 ]
-_WORK_UNLUCKY = [
-    ("📶 Wifi putus pas lagi joki, cuma dapet uang lelah", 10, 25),
-    ("⌨️ Keyboard error pas ngedit, bayaran dipotong", 15, 30),
+_WORK_FAILS = [
+    "Wifi putus pas lagi joki, gagal dapet bayaran.",
+    "Ketiduran pas shift, gaji hangus.",
+    "Kalah taruhan match, pulang tangan kosong.",
 ]
 
 
-@tree.command(name="kerja", description="Kerja random (RNG) untuk dapat Koin — cooldown 5 menit", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="kerja", description="Cari koin lewat kerja sampingan", guild=discord.Object(id=GUILD_ID))
 async def slash_kerja(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     work_cd_map = ECONOMY_DATA.setdefault("work_cd", {})
@@ -692,32 +693,33 @@ async def slash_kerja(interaction: discord.Interaction):
         left = int(WORK_CD_SECONDS - elapsed) + 1
         mins, secs = divmod(left, 60)
         await interaction.response.send_message(
-            f"⏳ Capek bro, jangan spam! Bisa `/kerja` lagi dalam **{mins}m {secs}d**.",
+            f"⏳ Masih capek, tunggu **{mins}m {secs}d** lagi baru bisa kerja.",
             ephemeral=True,
         )
         return
     work_cd_map[uid] = now
     roll = _rng.random()
-    if roll < 0.15:
+    if roll < 0.12:
         job_name, lo, hi = _rng.choice(_WORK_JACKPOTS)
-        tag = "🌟 **JACKPOT!**"
+        earned = _rng.randint(lo, hi)
+        title = "🎉 Bonus Kerja"
+        desc = f"**{job_name}** — dapet **+{earned} Koin**"
         col = GOLD
-    elif roll < 0.25:
-        job_name, lo, hi = _rng.choice(_WORK_UNLUCKY)
-        tag = "😅 **Kurang Beruntung...**"
+    elif roll < 0.30:
+        reason = _rng.choice(_WORK_FAILS)
+        earned = 0
+        title = "😅 Zonk"
+        desc = f"{reason}\nDapet **0 Koin**."
         col = RED
     else:
         job_name, lo, hi = _rng.choice(_WORK_JOBS)
-        tag = "💼 **Selesai Kerja!**"
+        earned = _rng.randint(lo, hi)
+        title = "💼 Kerja Sampingan"
+        desc = f"**{job_name}** — dapet **+{earned} Koin**"
         col = GREEN
-    earned = _rng.randint(lo, hi)
     new_bal = _add_coins(interaction.user.id, earned)
-    e = discord.Embed(
-        title=f"{tag}",
-        description=f"Pekerjaan: **{job_name}**\nBayaran: **+{earned} Koin**",
-        colour=col,
-    )
-    e.set_footer(text=f"Saldo sekarang: {new_bal} Koin • Cooldown 5 menit")
+    e = discord.Embed(title=title, description=desc, colour=col)
+    e.set_footer(text=f"Saldo: {new_bal} Koin")
     await interaction.response.send_message(embed=e)
 
 
