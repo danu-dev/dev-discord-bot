@@ -29,14 +29,14 @@ import discord
 
 GUILD_ID = 1572541420298829834
 OWNER_ID = 1409498347294822502
-COMMANDS_CHANNEL = 1572712087208329317  # #🤖╎bot-commands
-QA_CHANNEL = 1572712112260653246        # #📋╎mod-log
-MODLOG_CHANNEL = 1572712112260653246    # #📋╎mod-log
-BOT_CATEGORY = 1572712069038604348      # #╔══〔 🔒 STAFF ONLY 〕══╗
-COMMUNITY_CATEGORY = 1572712060922364085
+COMMANDS_CHANNEL = 1573525454311264356  # #🤖╎bot-commands
+QA_CHANNEL = 1573525475437977640        # #📋╎mod-log
+MODLOG_CHANNEL = 1573525475437977640    # #📋╎mod-log
+BOT_CATEGORY = 1573525392273186849      # 🔒 STAFF
+COMMUNITY_CATEGORY = 1573525346261934080  # 💬 CHAT
 IDEAS_CHANNEL = 0
-STATS_CHANNEL = 1572712087208329317
-WELCOME_CHANNEL = 1572712074390544465   # #👋╎welcome
+STATS_CHANNEL = 1573525454311264356
+WELCOME_CHANNEL = 1573522401873104907   # #👋╎welcome
 MEMBER_ROLE_ID = 1572712053175754883    # Member
 MOD_ROLE_ID = 1572712033500135605       # Moderator
 FOUNDER_ROLE_ID = 1572717150089650238   # 👑 ╎ Founder
@@ -641,11 +641,12 @@ HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
 # --- Extra Features (Role Picker, Suggestion, Ticket, XP, Mod-Log, Temp Voice)
 ROLE_PICKER_MAP = {
     "pick_pc": ("PC", "🖥️ PC"),
-    "pick_ps": ("PlayStation", "🎮 PlayStation"),
-    "pick_xbox": ("Xbox", "🟩 Xbox"),
     "pick_mobile": ("Mobile", "📱 Mobile"),
-    "pick_switch": ("Nintendo Switch", "🍄 Switch"),
-    "pick_lfg": ("Looking for Group", "🔎 LFG"),
+    "pick_nightowl": ("🌙 ╎ Night Owl", "🌙 Night Owl"),
+    "pick_chill": ("☕ ╎ Chill Vibes", "☕ Chill Vibes"),
+    "pick_tryhard": ("🎯 ╎ Tryhard", "🎯 Tryhard"),
+    "pick_creative": ("🎨 ╎ Creative", "🎨 Creative"),
+    "pick_music": ("🎧 ╎ Music Lover", "🎧 Music Lover"),
 }
 TEMP_VOICE_HUB_NAME = "➕ ╎ Buat Room"
 TEMP_VOICE_IDS = set()
@@ -667,29 +668,33 @@ class RolePickerView(discord.ui.View):
             await interaction.user.add_roles(r, reason="Self-role toggle")
             await interaction.response.send_message(f"✅ Role **{label}** dipasang!", ephemeral=True)
 
-    @discord.ui.button(label="PC", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="pick_pc")
+    @discord.ui.button(label="PC", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="pick_pc", row=0)
     async def pc_btn(self, interaction, _b):
         await self._toggle(interaction, *ROLE_PICKER_MAP["pick_pc"])
 
-    @discord.ui.button(label="PlayStation", emoji="🎮", style=discord.ButtonStyle.primary, custom_id="pick_ps")
-    async def ps_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_ps"])
-
-    @discord.ui.button(label="Xbox", emoji="🟩", style=discord.ButtonStyle.success, custom_id="pick_xbox")
-    async def xbox_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_xbox"])
-
-    @discord.ui.button(label="Mobile", emoji="📱", style=discord.ButtonStyle.secondary, custom_id="pick_mobile")
+    @discord.ui.button(label="Mobile", emoji="📱", style=discord.ButtonStyle.secondary, custom_id="pick_mobile", row=0)
     async def mobile_btn(self, interaction, _b):
         await self._toggle(interaction, *ROLE_PICKER_MAP["pick_mobile"])
 
-    @discord.ui.button(label="Switch", emoji="🍄", style=discord.ButtonStyle.danger, custom_id="pick_switch")
-    async def switch_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_switch"])
+    @discord.ui.button(label="Night Owl", emoji="🌙", style=discord.ButtonStyle.secondary, custom_id="pick_nightowl", row=1)
+    async def nightowl_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_nightowl"])
 
-    @discord.ui.button(label="LFG", emoji="🔎", style=discord.ButtonStyle.secondary, custom_id="pick_lfg")
-    async def lfg_btn(self, interaction, _b):
-        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_lfg"])
+    @discord.ui.button(label="Chill Vibes", emoji="☕", style=discord.ButtonStyle.secondary, custom_id="pick_chill", row=1)
+    async def chill_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_chill"])
+
+    @discord.ui.button(label="Tryhard", emoji="🎯", style=discord.ButtonStyle.danger, custom_id="pick_tryhard", row=1)
+    async def tryhard_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_tryhard"])
+
+    @discord.ui.button(label="Creative", emoji="🎨", style=discord.ButtonStyle.primary, custom_id="pick_creative", row=1)
+    async def creative_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_creative"])
+
+    @discord.ui.button(label="Music Lover", emoji="🎧", style=discord.ButtonStyle.success, custom_id="pick_music", row=1)
+    async def music_btn(self, interaction, _b):
+        await self._toggle(interaction, *ROLE_PICKER_MAP["pick_music"])
 
 
 # --- Suggestion System (/suggestion) --------------------------------------
@@ -1313,14 +1318,19 @@ async def on_member_join(member):
     if member.guild.id != GUILD_ID or member.bot:
         return
     await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`)", GREEN)
-    ch = member.guild.get_channel(WELCOME_CHANNEL)
+    ch = member.guild.get_channel(WELCOME_CHANNEL) or discord.utils.find(
+        lambda c: isinstance(c, discord.TextChannel) and "welcome" in c.name.lower(),
+        member.guild.channels,
+    )
     if ch:
         e = discord.Embed(
             title="👋 ╎ Member Baru Bergabung!",
-            description=f"Selamat datang {member.mention} di **{member.guild.name}**! 🎉\n"
-                        f"• Baca aturan di <#1572712072179879996>\n"
-                        f"• Kenalan di <#1572712080341991554>\n"
-                        f"• Mulai ngobrol di <#1572712078295437413>",
+            description=(
+                f"Selamat datang {member.mention} di **{member.guild.name}**! 🎉\n"
+                f"• Baca aturan di <#1573525422585684185>\n"
+                f"• Ambil role di <#1573524001240780820>\n"
+                f"• Mulai ngobrol di <#1573525427228516382>"
+            ),
             colour=0xEB459E,
         )
         e.set_thumbnail(url=member.display_avatar.url)
@@ -1399,14 +1409,17 @@ async def on_message(msg):
         await msg.reply("🧠 Ingatan percakapan AI sudah di-reset.", mention_author=False)
         return
     if low == "!panel-role":
-        w = guild.get_channel(WELCOME_CHANNEL)
+        w = discord.utils.find(
+            lambda c: isinstance(c, discord.TextChannel) and "role" in c.name.lower(),
+            guild.channels,
+        ) or guild.get_channel(WELCOME_CHANNEL)
         e = discord.Embed(
-            title="🎭 ╎ PILIH ROLE GAMING KAMU",
-            description="Klik tombol di bawah untuk memasang atau melepas role platform & LFG kamu!",
+            title="🎭 ╎ PILIH ROLE KAMU",
+            description="Klik tombol di bawah untuk memasang atau melepas role kamu!",
             colour=BLURPLE,
         )
-        e.add_field(name="🖥️ Platform", value="PC • PlayStation • Xbox • Mobile • Switch", inline=False)
-        e.add_field(name="🔎 Komunitas", value="Looking for Group (cari teman mabar)", inline=False)
+        e.add_field(name="🖥️ Platform", value="PC • Mobile", inline=False)
+        e.add_field(name="✨ Vibes & Keren-kerenan", value="🌙 Night Owl • ☕ Chill Vibes • 🎯 Tryhard • 🎨 Creative • 🎧 Music Lover", inline=False)
         e.set_footer(text="DEV Server • Self-Role Picker")
         await (w or msg.channel).send(embed=e, view=RolePickerView())
         if w and w.id != msg.channel.id:
