@@ -113,6 +113,7 @@ Aksi (pakai nama persis dari state server; maks 15):
 - give_role / remove_role: member, role
 - edit_server: name|null, description|null
 - send_embed: channel, title, description, color(#RRGGBB)
+- send_message: channel, content
 - purge_messages: channel, limit(int)
 
 Fitur bot yang BENAR-BENAR ADA: /ban, /unban, /kick, /timeout, /purge, /members, /userinfo, /poll, /suggestion, /rank, /leaderboard, !help, !qa, !stats, !panel-role, !panel-ticket, !reset, !lofi [next|stop|list], !play <judul>, !skip, !queue, !stop, auto-role Member saat join, auto-role Legend (Lv.5) & VIP (Lv.10), welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
@@ -352,6 +353,7 @@ def describe(a):
         "remove_role": lambda: f"➖ Cabut role **{g('role')}** dari **{g('member')}**",
         "edit_server": lambda: f"🏠 Ubah info server ({g('name') or 'nama tetap'})",
         "send_embed": lambda: f"📨 Kirim embed **{g('title')}** ke #{g('channel')}" + (f" (`{(g('description') or '')[:60]}…`)" if g('description') else ""),
+        "send_message": lambda: f"💬 Kirim pesan ke #{g('channel')} (`{(g('content') or '')[:60]}…`)",
         "purge_messages": lambda: f"🧹 Hapus **{g('limit')}** pesan terakhir di #{g('channel')}",
     }[t]()
 
@@ -512,6 +514,16 @@ async def act_send_embed(guild, a):
     e.set_footer(text="DEV Server")
     await c.send(embed=e)
     return f"embed terkirim ke {c.mention}"
+
+
+async def act_send_message(guild, a):
+    c = await _chan(guild, a)
+    text = (a.get("content") or "").strip()
+    if not text:
+        raise ValueError("isi pesan kosong")
+    for i in range(0, len(text), 1950):
+        await c.send(text[i:i + 1950], allowed_mentions=discord.AllowedMentions(roles=True))
+    return f"pesan terkirim ke {c.mention}"
 
 
 async def act_purge_messages(guild, a):
@@ -2201,6 +2213,61 @@ async def on_message(msg):
         await (w or msg.channel).send(embed=e, view=RolePickerView())
         if w and w.id != msg.channel.id:
             await msg.reply(f"✅ Panel pilih role dikirim ke {w.mention}.", mention_author=False)
+        return
+    if low.startswith("!buat ") or low.startswith("!buat\n"):
+        lines = text.split("\n", 1)
+        header = lines[0][5:].strip()
+        body = lines[1].strip() if len(lines) > 1 else ""
+        if not header or not body:
+            await msg.reply(
+                "Format gampang:\n```\n!buat nama-channel\nIsi pesan kamu di sini...\n```",
+                mention_author=False,
+            )
+            return
+        ch = None
+        created = False
+        if header.startswith("<#") and header.endswith(">") and header[2:-1].isdigit():
+            ch = guild.get_channel(int(header[2:-1]))
+        if ch is None:
+            cat = None
+            ch_name = header
+            if "|" in header:
+                ch_name, cat_name = [p.strip() for p in header.split("|", 1)]
+                cat = find_category(guild, cat_name)
+            ow = {
+                guild.default_role: discord.PermissionOverwrite(send_messages=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            }
+            ch = await guild.create_text_channel(
+                name=ch_name[:100], category=cat, overwrites=ow, reason=f"!buat oleh {msg.author}"
+            )
+            created = True
+        out_lines = []
+        for ln in body.splitlines():
+            s = ln.strip()
+            if s.startswith("loadstring(") and not s.startswith("`"):
+                out_lines.append(f"`{s}`")
+            else:
+                out_lines.append(ln)
+        final_text = "\n".join(out_lines)
+        chunks = []
+        cur = ""
+        for para in final_text.split("\n\n"):
+            cand = f"{cur}\n\n{para}" if cur else para
+            if len(cand) <= 1950:
+                cur = cand
+            else:
+                if cur:
+                    chunks.append(cur)
+                cur = para[:1950]
+        if cur:
+            chunks.append(cur)
+        for chunk in chunks:
+            await ch.send(chunk, allowed_mentions=discord.AllowedMentions(roles=True))
+        await msg.reply(
+            f"✅ Channel {ch.mention} {'dibuat & ' if created else ''}diisi ({len(chunks)} pesan).",
+            mention_author=False,
+        )
         return
     if low == "!panel-ticket":
         g = guild.get_channel(1573532365970481263) or msg.channel
