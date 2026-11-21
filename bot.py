@@ -652,7 +652,7 @@ def _help_embed(member):
     if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
-            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel`\n"
+            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/buatlist`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
@@ -1302,6 +1302,234 @@ async def slash_poll(interaction: discord.Interaction, pertanyaan: str, opsi1: s
     msg = await interaction.original_response()
     for i in range(len(opts)):
         await msg.add_reaction(POLL_EMOJIS[i])
+
+
+def _strip_leading_number(text):
+    """Hapus nomor urut awal seperti '1. ' atau '2) ' jika user sudah menulisnya."""
+    s = text.strip()
+    i = 0
+    while i < len(s) and s[i].isdigit():
+        i += 1
+    if i > 0 and i < len(s) and s[i] in (".", ")"):
+        return s[i + 1:].strip()
+    return s
+
+
+def _parse_list_items(raw_text):
+    """Parse daftar item dari format 'Judul | Isi' atau format 2-baris (Judul lalu kode/URL)."""
+    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    if any("|" in ln for ln in lines):
+        items = []
+        for ln in lines:
+            if "|" in ln:
+                title, body = ln.split("|", 1)
+                items.append((_strip_leading_number(title), body.strip()))
+            elif items:
+                prev_t, prev_b = items[-1]
+                items[-1] = (prev_t, f"{prev_b}\n{ln}".strip())
+            else:
+                items.append((_strip_leading_number(ln), ""))
+        return items
+    # Cek format 2-baris: baris ganjil judul, baris genap kode/URL
+    if len(lines) >= 2 and len(lines) % 2 == 0:
+        pairs = []
+        looks_paired = True
+        for idx in range(0, len(lines), 2):
+            body = lines[idx + 1]
+            if not (
+                body.startswith("`")
+                or "loadstring" in body
+                or "http://" in body
+                or "https://" in body
+            ):
+                looks_paired = False
+                break
+            pairs.append((_strip_leading_number(lines[idx]), body))
+        if looks_paired:
+            return pairs
+    return None
+
+
+def _format_code_body(body, code_format):
+    if not body:
+        return ""
+    clean = body.strip()
+    if clean.startswith("```") and clean.endswith("```"):
+        clean = clean[3:-3].strip()
+    elif clean.startswith("`") and clean.endswith("`") and len(clean) >= 2:
+        clean = clean[1:-1].strip()
+    if code_format == "lua":
+        return f"```lua\n{clean}\n```"
+    if code_format == "plain":
+        return clean
+    return f"`{clean}`"
+
+
+def _format_list_messages(intro, raw_text, mention_role=None, code_format="inline"):
+    header = (intro or "").strip()
+    if mention_role:
+        if "{role}" in header:
+            header = header.replace("{role}", mention_role.mention)
+        elif header:
+            header = f"{header} {mention_role.mention}"
+        else:
+            header = mention_role.mention
+
+    parsed = _parse_list_items(raw_text)
+    if parsed is None:
+        blocks = [header, raw_text.strip()] if header else [raw_text.strip()]
+    else:
+        blocks = [header] if header else []
+        for idx, (title, body) in enumerate(parsed, start=1):
+            formatted_body = _format_code_body(body, code_format)
+            entry = f"{idx}. {title}\n{formatted_body}" if formatted_body else f"{idx}. {title}"
+            blocks.append(entry)
+
+    chunks = []
+    current = ""
+    for blk in blocks:
+        if not blk:
+            continue
+        candidate = f"{current}\n\n{blk}" if current else blk
+        if len(candidate) <= 1950:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            if len(blk) <= 1950:
+                current = blk
+            else:
+                for start in range(0, len(blk), 1950):
+                    chunks.append(blk[start:start + 1950])
+                current = ""
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+class CustomListModal(discord.ui.Modal, title="Buat Channel & Pesan List"):
+    intro_input = discord.ui.TextInput(
+        label="Teks Pembuka (opsional)",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=500,
+        placeholder="Inilah beberapa list loadstring game ... Cara copy? klik aja yang mau di copy 💞",
+    )
+    items_input = discord.ui.TextInput(
+        label="Daftar Item (Format: Judul | Isi)",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=4000,
+        placeholder='ELYSIUM HUB (No Key) | loadstring(game:HttpGet("https://..."))()\nRAGESPLOIT HUB | loadstring(game:HttpGet("https://..."))()',
+    )
+
+    def __init__(self, channel_name, category, target_channel, read_only, mention_role, code_format):
+        super().__init__()
+        self.channel_name = channel_name
+        self.category = category
+        self.target_channel = target_channel
+        self.read_only = read_only
+        self.mention_role = mention_role
+        self.code_format = code_format
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        ch = self.target_channel
+        created = False
+        if ch is None:
+            overwrites = None
+            if self.read_only:
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(send_messages=False),
+                    guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                }
+            try:
+                ch = await guild.create_text_channel(
+                    name=self.channel_name[:100],
+                    category=self.category,
+                    overwrites=overwrites or discord.utils.MISSING,
+                    reason=f"/buatlist oleh {interaction.user}",
+                )
+                created = True
+            except discord.Forbidden:
+                await interaction.followup.send("❌ Bot tidak punya izin untuk membuat channel.", ephemeral=True)
+                return
+            except discord.HTTPException as exc:
+                await interaction.followup.send(f"❌ Gagal membuat channel: `{exc}`", ephemeral=True)
+                return
+
+        chunks = _format_list_messages(
+            self.intro_input.value,
+            self.items_input.value,
+            mention_role=self.mention_role,
+            code_format=self.code_format,
+        )
+        if not chunks:
+            await interaction.followup.send("❌ Isi pesan tidak boleh kosong.", ephemeral=True)
+            return
+
+        allowed = discord.AllowedMentions(roles=True) if self.mention_role else discord.AllowedMentions.none()
+        try:
+            for chunk in chunks:
+                await ch.send(chunk, allowed_mentions=allowed)
+        except discord.Forbidden:
+            await interaction.followup.send(f"❌ Bot tidak punya izin kirim pesan di {ch.mention}.", ephemeral=True)
+            return
+        except discord.HTTPException as exc:
+            await interaction.followup.send(f"❌ Gagal mengirim pesan: `{exc}`", ephemeral=True)
+            return
+
+        action_txt = "dibuat dan diisi" if created else "diisi"
+        await interaction.followup.send(
+            f"✅ Channel {ch.mention} berhasil {action_txt} ({len(chunks)} pesan terkirim).",
+            ephemeral=True,
+        )
+
+
+@tree.command(name="buatlist", description="Buat channel baru + kirim pesan list custom (seperti list loadstring)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(
+    nama_channel="Nama channel baru (contoh: │ 🐱-loadstring-adopt-me)",
+    kategori="Kategori tempat channel baru dibuat (opsional)",
+    channel_tujuan="Kirim ke channel yang sudah ada tanpa bikin baru (opsional)",
+    read_only="Kunci channel agar member hanya bisa baca (default: Ya)",
+    mention_role="Role yang ingin di-mention di pesan (opsional)",
+    format_kode="Format tampilan kode/isi item",
+)
+@discord.app_commands.choices(format_kode=[
+    discord.app_commands.Choice(name="Inline Code (`kode` - tap untuk copy seperti di gambar)", value="inline"),
+    discord.app_commands.Choice(name="Code Block (```lua ... ```)", value="lua"),
+    discord.app_commands.Choice(name="Teks Biasa (tanpa backtick)", value="plain"),
+])
+async def slash_buatlist(
+    interaction: discord.Interaction,
+    nama_channel: str = None,
+    kategori: discord.CategoryChannel = None,
+    channel_tujuan: discord.TextChannel = None,
+    read_only: bool = True,
+    mention_role: discord.Role = None,
+    format_kode: str = "inline",
+):
+    if not _has_mod_perm(interaction.user, "manage_channels"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin `Manage Channels` untuk command ini.", ephemeral=True)
+        return
+    if not nama_channel and not channel_tujuan:
+        await interaction.response.send_message(
+            "❌ Isi minimal salah satu: `nama_channel` (untuk buat channel baru) atau `channel_tujuan` (untuk channel yang sudah ada).",
+            ephemeral=True,
+        )
+        return
+    modal = CustomListModal(
+        channel_name=nama_channel,
+        category=kategori,
+        target_channel=channel_tujuan,
+        read_only=read_only,
+        mention_role=mention_role,
+        code_format=format_kode,
+    )
+    await interaction.response.send_modal(modal)
 
 
 # --- Mod-Log Helpers ------------------------------------------------------
