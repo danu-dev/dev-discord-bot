@@ -640,7 +640,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🛠️ Komunitas & Info",
-        value="`/help` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        value="`/help` • `/koin` • `/shop` • `/invites` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
         inline=False,
     )
     e.add_field(
@@ -982,6 +982,7 @@ async def _grant_bonus_xp(guild, member, amount):
     new_xp = old_xp + amount
     XP_DATA[uid] = new_xp
     _save_xp()
+    _add_coins(member.id, max(10, amount * 2))
     old_lvl, new_lvl = _xp_level(old_xp), _xp_level(new_xp)
     if new_lvl > old_lvl:
         rank_label = await _sync_ml_role(guild, member, new_lvl)
@@ -2039,9 +2040,10 @@ async def background_qa_and_autorole():
                                 await m.add_roles(member_role, reason="Auto-assign role Member")
                             except Exception:
                                 pass
+                await _update_server_counters(guild)
         except Exception as exc:
             log("bg loop error:", exc)
-        await asyncio.sleep(300)
+        await asyncio.sleep(360)
 
 
 def start_health_server():
@@ -2686,6 +2688,202 @@ async def _ensure_founder_panel():
         log("ensure founder panel error:", exc)
 
 
+# --- Economy (Coins & Role Shop), Invite Tracker & Server Counters --------
+ECONOMY_FILE = os.environ.get("ECONOMY_FILE", "dev-economy-data.json")
+ECONOMY_DATA = {"coins": {}, "invites": {}}
+if os.path.exists(ECONOMY_FILE):
+    try:
+        _loaded_eco = json.loads(read(ECONOMY_FILE))
+        if isinstance(_loaded_eco, dict):
+            ECONOMY_DATA["coins"] = _loaded_eco.get("coins", {})
+            ECONOMY_DATA["invites"] = _loaded_eco.get("invites", {})
+    except Exception:
+        pass
+
+
+def _save_economy():
+    try:
+        with open(ECONOMY_FILE, "w", encoding="utf-8") as fh:
+            json.dump(ECONOMY_DATA, fh)
+    except Exception:
+        pass
+
+
+def _get_coins(uid):
+    return int(ECONOMY_DATA["coins"].get(str(uid), 0))
+
+
+def _add_coins(uid, amount):
+    key = str(uid)
+    ECONOMY_DATA["coins"][key] = max(0, _get_coins(uid) + int(amount))
+    _save_economy()
+    return ECONOMY_DATA["coins"][key]
+
+
+SHOP_ROLES = [
+    ("ruby", "🎨 ╎ Ruby Red", 0xE74C3C, 250, "Role warna merah menyala"),
+    ("cyan", "💎 ╎ Cyan Diamond", 0x1ABC9C, 400, "Role warna biru berlian"),
+    ("gold", "⚡ ╎ Gold Rush", 0xF1C40F, 600, "Role warna emas sultan"),
+    ("sultan", "👑 ╎ Sultan DEV", 0x9B59B6, 1000, "Role ungu eksklusif Sultan DEV"),
+]
+
+
+class ShopRoleSelect(discord.ui.Select):
+    def __init__(self):
+        opts = [
+            discord.SelectOption(label=f"{name} ({price} Koin)", value=key, description=desc)
+            for key, name, _col, price, desc in SHOP_ROLES
+        ]
+        super().__init__(placeholder="🛒 Pilih role yang ingin dibeli...", min_values=1, max_values=1, options=opts, custom_id="shop_role_select")
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        item = next((x for x in SHOP_ROLES if x[0] == key), None)
+        if not item:
+            await interaction.response.send_message("❌ Item tidak ditemukan.", ephemeral=True)
+            return
+        _k, role_name, role_color, price, _desc = item
+        bal = _get_coins(interaction.user.id)
+        if bal < price:
+            await interaction.response.send_message(
+                f"❌ Koin kamu kurang! Saldo: **{bal}** Koin, harga **{role_name}**: **{price}** Koin.",
+                ephemeral=True,
+            )
+            return
+        role = find_role(interaction.guild, role_name)
+        if not role:
+            role = await interaction.guild.create_role(
+                name=role_name,
+                colour=discord.Colour(role_color),
+                hoist=False,
+                mentionable=False,
+                reason="Shop Role otomatis",
+            )
+        if role in interaction.user.roles:
+            await interaction.response.send_message(f"ℹ️ Kamu sudah memiliki role {role.mention}.", ephemeral=True)
+            return
+        _add_coins(interaction.user.id, -price)
+        await interaction.user.add_roles(role, reason=f"Dibeli di /shop seharga {price} Koin")
+        await interaction.response.send_message(
+            f"🎉 Berhasil membeli & memasang {role.mention}! Sisa koin: **{_get_coins(interaction.user.id)}**.",
+            ephemeral=True,
+        )
+
+
+class ShopView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(ShopRoleSelect())
+
+
+@tree.command(name="koin", description="Cek saldo koin & XP kamu atau member lain", guild=discord.Object(id=GUILD_ID))
+async def slash_koin(interaction: discord.Interaction, member: discord.Member = None):
+    m = member or interaction.user
+    coins = _get_coins(m.id)
+    xp = XP_DATA.get(str(m.id), 0)
+    invs = int(ECONOMY_DATA["invites"].get(str(m.id), 0))
+    e = discord.Embed(title=f"🪙 ╎ Dompet {m.display_name}", colour=GOLD)
+    e.set_thumbnail(url=m.display_avatar.url)
+    e.add_field(name="🪙 Koin", value=f"**{coins}**", inline=True)
+    e.add_field(name="⭐ XP", value=f"**{xp}**", inline=True)
+    e.add_field(name="🤝 Invite", value=f"**{invs}** orang", inline=True)
+    e.set_footer(text="Dapatkan koin dari chat, /daily, mini-game, dan ajak teman!")
+    await interaction.response.send_message(embed=e)
+
+
+@tree.command(name="shop", description="Buka toko role menggunakan koin", guild=discord.Object(id=GUILD_ID))
+async def slash_shop(interaction: discord.Interaction):
+    bal = _get_coins(interaction.user.id)
+    lines = [f"• **{name}** — `{price} Koin` ({desc})" for _k, name, _c, price, desc in SHOP_ROLES]
+    e = discord.Embed(
+        title="🛒 ╎ Toko Role DEV Server",
+        description=f"Saldo kamu saat ini: **🪙 {bal} Koin**\n\n" + "\n".join(lines),
+        colour=BLURPLE,
+    )
+    await interaction.response.send_message(embed=e, view=ShopView(), ephemeral=True)
+
+
+@tree.command(name="givekoin", description="Tambah koin ke member (khusus Owner)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(member="Member target", jumlah="Jumlah koin yang ditambahkan")
+async def slash_givekoin(interaction: discord.Interaction, member: discord.Member, jumlah: int):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("❌ Command ini khusus Owner.", ephemeral=True)
+        return
+    new_bal = _add_coins(member.id, jumlah)
+    await interaction.response.send_message(f"🪙 Saldo {member.mention} sekarang **{new_bal} Koin**.")
+
+
+INVITE_CACHE = {}
+
+
+async def _refresh_invites(guild):
+    try:
+        invs = await guild.invites()
+        INVITE_CACHE[guild.id] = {inv.code: (inv.uses or 0, inv.inviter.id if inv.inviter else None) for inv in invs}
+    except Exception:
+        pass
+
+
+@client.event
+async def on_invite_create(invite):
+    if invite.guild and invite.guild.id == GUILD_ID:
+        INVITE_CACHE.setdefault(invite.guild.id, {})[invite.code] = (invite.uses or 0, invite.inviter.id if invite.inviter else None)
+
+
+@client.event
+async def on_invite_delete(invite):
+    if invite.guild and invite.guild.id == GUILD_ID:
+        INVITE_CACHE.get(invite.guild.id, {}).pop(invite.code, None)
+
+
+@tree.command(name="invites", description="Lihat jumlah undangan & top pengundang server", guild=discord.Object(id=GUILD_ID))
+async def slash_invites(interaction: discord.Interaction, member: discord.Member = None):
+    m = member or interaction.user
+    cnt = int(ECONOMY_DATA["invites"].get(str(m.id), 0))
+    top = sorted(ECONOMY_DATA["invites"].items(), key=lambda kv: -int(kv[1]))[:10]
+    lines = []
+    for i, (uid, icnt) in enumerate(top, 1):
+        u = interaction.guild.get_member(int(uid))
+        uname = u.display_name if u else f"User {uid}"
+        lines.append(f"`{i}.` **{uname}** — `{icnt}` undangan")
+    e = discord.Embed(
+        title="🤝 ╎ Invite Tracker",
+        description=f"Undangan {m.mention}: **{cnt} orang**\n\n**🏆 Top Pengundang:**\n" + ("\n".join(lines) or "_Belum ada data_"),
+        colour=GREEN,
+    )
+    await interaction.response.send_message(embed=e)
+
+
+_LAST_COUNTER_UPDATE = 0.0
+
+
+async def _update_server_counters(guild):
+    global _LAST_COUNTER_UPDATE
+    now = time.time()
+    if now - _LAST_COUNTER_UPDATE < 300:
+        return
+    _LAST_COUNTER_UPDATE = now
+    total_members = guild.member_count or len(guild.members)
+    online_members = sum(1 for m in guild.members if m.status != discord.Status.offline)
+    targets = [
+        ("👥 Member:", f"👥 Member: {total_members}", 0),
+        ("🟢 Online:", f"🟢 Online: {online_members}", 1),
+    ]
+    ow = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True),
+    }
+    for prefix, desired_name, pos in targets:
+        ch = discord.utils.find(lambda c: isinstance(c, discord.VoiceChannel) and c.name.startswith(prefix), guild.channels)
+        try:
+            if not ch:
+                await guild.create_voice_channel(desired_name, position=pos, overwrites=ow, reason="Live Server Counter")
+            elif ch.name != desired_name:
+                await ch.edit(name=desired_name, reason="Update Live Server Counter")
+        except Exception as exc:
+            log("counter update error:", exc)
+
+
 @client.event
 async def on_ready():
     client.add_view(RolePickerView())
@@ -2697,12 +2895,17 @@ async def on_ready():
     client.add_view(FounderManageView())
     client.add_view(GiveawayView())
     client.add_view(TempVoiceView())
+    client.add_view(ShopView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
             await tree.sync(guild=discord.Object(id=GUILD_ID))
         except Exception as exc:
             log("tree sync error:", exc)
+        guild = client.get_guild(GUILD_ID)
+        if guild:
+            await _refresh_invites(guild)
+            await _update_server_counters(guild)
         await _ensure_founder_panel()
         client.loop.create_task(background_qa_and_autorole())
     log(f"online sebagai {client.user} — melayani owner {OWNER_ID} di #commands")
@@ -2712,13 +2915,35 @@ async def on_ready():
 async def on_member_join(member):
     if member.guild.id != GUILD_ID or member.bot:
         return
+    inviter_id = None
+    try:
+        old_cache = INVITE_CACHE.get(member.guild.id, {})
+        invs = await member.guild.invites()
+        new_cache = {}
+        for inv in invs:
+            uses = inv.uses or 0
+            iid = inv.inviter.id if inv.inviter else None
+            new_cache[inv.code] = (uses, iid)
+            prev_uses, _ = old_cache.get(inv.code, (0, iid))
+            if uses > prev_uses and iid and iid != member.id:
+                inviter_id = iid
+        INVITE_CACHE[member.guild.id] = new_cache
+    except Exception:
+        pass
+    if inviter_id:
+        ECONOMY_DATA["invites"][str(inviter_id)] = int(ECONOMY_DATA["invites"].get(str(inviter_id), 0)) + 1
+        _add_coins(inviter_id, 100)
+        inviter_member = member.guild.get_member(inviter_id)
+        if inviter_member:
+            await _grant_bonus_xp(member.guild, inviter_member, 50)
     role = member.guild.get_role(MEMBER_ROLE_ID)
     if role and role not in member.roles:
         try:
             await member.add_roles(role, reason="Auto-role Member saat join")
         except Exception:
             pass
-    await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`)", GREEN)
+    inv_txt = f"\nDiundang oleh: <@{inviter_id}> (+100 Koin, +50 XP)" if inviter_id else ""
+    await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`){inv_txt}", GREEN)
     ch = member.guild.get_channel(WELCOME_CHANNEL) or discord.utils.find(
         lambda c: isinstance(c, discord.TextChannel) and "welcome" in c.name.lower(),
         member.guild.channels,
