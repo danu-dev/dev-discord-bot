@@ -115,7 +115,7 @@ Aksi (pakai nama persis dari state server; maks 15):
 - send_embed: channel, title, description, color(#RRGGBB)
 - purge_messages: channel, limit(int)
 
-Fitur bot yang BENAR-BENAR ADA: /ban, /unban, /kick, /timeout, /purge, /members, /userinfo, /poll, /suggestion, /rank, /leaderboard, !help, !qa, !stats, !panel-role, !panel-ticket, !reset, !lofi [next|stop|list], !play <judul>, !skip, !queue, !stop, auto-role Member saat join, auto-role Legend (Lv.5) & VIP (Lv.10), welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
+Fitur bot yang BENAR-BENAR ADA: /ban, /unban, /kick, /timeout, /purge, /members, /userinfo, /poll, /suggestion, /rank, /leaderboard, /play, /lofi, /skip, /queue, /stop, !help, !qa, !stats, !panel-role, !panel-ticket, !reset, auto-role Member saat join, auto-role Legend (Lv.5) & VIP (Lv.10), welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
 Aturan ketat:
 1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru yang belum ada, jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
 2. Jika owner hanya ngobrol, bertanya, atau minta saran/ide, jawab dengan gaya santai, cerdas, ramah, dan natural di "reply" dengan actions [].
@@ -645,7 +645,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🎵 Musik & Lofi",
-        value="`!play <judul>` • `!lofi [next|stop|list]` • `!skip` • `!queue` • `!stop`",
+        value="`/play <judul>` • `/lofi [stasiun]` • `/skip` • `/queue` • `/stop`",
         inline=False,
     )
     perms = member.guild_permissions
@@ -1601,12 +1601,12 @@ class LofiView(discord.ui.View):
         )
 
 
-async def _ensure_voice(msg):
-    if not msg.author.voice or not msg.author.voice.channel:
-        await msg.reply("🎧 Masuk ke voice channel dulu!", mention_author=False)
+async def _ensure_voice(guild, member, channel, reply_fn):
+    if not member.voice or not member.voice.channel:
+        await reply_fn("🎧 Masuk ke voice channel dulu!")
         return None
-    voice_ch = msg.author.voice.channel
-    vc = msg.guild.voice_client
+    voice_ch = member.voice.channel
+    vc = guild.voice_client
     if vc and vc.is_connected():
         if vc.channel.id != voice_ch.id:
             await vc.move_to(voice_ch)
@@ -1614,96 +1614,108 @@ async def _ensure_voice(msg):
     else:
         vc = await voice_ch.connect(timeout=30, self_deaf=True)
         await _wait_dave_ready(vc)
-    me_voice = msg.guild.me.voice if msg.guild.me else None
+    me_voice = guild.me.voice if guild.me else None
     if me_voice and me_voice.suppress:
         try:
-            await msg.guild.me.edit(suppress=False)
+            await guild.me.edit(suppress=False)
         except Exception:
             pass
     if me_voice and me_voice.mute:
-        await msg.channel.send("⚠️ Bot sedang di-**Server Mute** di voice channel, unmute bot agar suaranya terdengar.")
+        await channel.send("⚠️ Bot sedang di-**Server Mute** di voice channel, unmute bot agar suaranya terdengar.")
     return vc
 
 
-async def handle_music_command(msg, text):
-    import shutil
-    parts = text.split(maxsplit=1)
-    cmd = parts[0].lower()
-    arg = parts[1].strip() if len(parts) > 1 else ""
-    guild = msg.guild
-    vc = guild.voice_client
-
-    if cmd in ("!stop", "!leave") or (cmd == "!lofi" and arg.lower() in ("stop", "leave", "keluar", "mati")):
-        MUSIC_QUEUE.clear()
-        NOW_PLAYING["track"] = None
+@tree.command(name="play", description="Putar lagu dari judul atau URL di voice channel", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(judul="Judul lagu atau link yang mau diputar")
+async def slash_play(interaction: discord.Interaction, judul: str):
+    await interaction.response.defer()
+    try:
+        vc = await _ensure_voice(interaction.guild, interaction.user, interaction.channel, interaction.followup.send)
         if not vc:
-            await msg.reply("🔇 Bot tidak sedang di voice channel.", mention_author=False)
             return
-        vc.stop()
-        await vc.disconnect()
-        await msg.reply("⏹️ Musik dimatikan & keluar dari voice.", mention_author=False)
-        return
-
-    if cmd in ("!queue", "!q"):
-        cur = NOW_PLAYING.get("track")
-        lines = [f"**Sedang diputar:** {cur['title']}" if cur else "**Sedang diputar:** tidak ada"]
-        for i, t in enumerate(MUSIC_QUEUE[:10], 1):
-            lines.append(f"`{i}.` {t['title']}")
-        await msg.reply(embed=discord.Embed(title="🎶 Antrian Lagu", description="\n".join(lines), colour=0x9B59B6),
-                        mention_author=False)
-        return
-
-    if cmd in ("!skip", "!next") or (cmd == "!lofi" and arg.lower() in ("next", "skip")):
-        if not vc or not vc.is_connected():
-            await msg.reply("🔇 Bot tidak sedang di voice.", mention_author=False)
-            return
-        if MUSIC_QUEUE:
-            vc.stop()
-            await msg.reply("⏭️ Skip ke lagu berikutnya.", mention_author=False)
+        track = await asyncio.to_thread(_search_track, judul)
+        track["requester"] = interaction.user.display_name
+        if vc.is_playing() or vc.is_paused():
+            MUSIC_QUEUE.append(track)
+            await interaction.followup.send(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**")
         else:
-            title = _play_station(vc, LOFI_STATE["idx"] + 1)
-            await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
-        return
+            MUSIC_QUEUE.append(track)
+            _play_next_in_queue(interaction.guild, interaction.channel)
+            await interaction.followup.send(embed=_music_embed(track, vc.channel.name), view=LofiView())
+    except Exception as exc:
+        log("music error:", exc)
+        await interaction.followup.send(f"❌ Gagal memutar audio: `{str(exc)[:180]}`")
 
-    if cmd == "!lofi" and arg.lower() in ("list", "stations", "stasiun"):
+
+@tree.command(name="lofi", description="Putar radio lofi 24/7 di voice channel", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(stasiun="Pilih stasiun lofi (opsional)")
+@discord.app_commands.choices(stasiun=[
+    discord.app_commands.Choice(name="☕ Lofi Beats Radio", value="lofi"),
+    discord.app_commands.Choice(name="🌃 Nightride Chillsynth", value="chillsynth"),
+    discord.app_commands.Choice(name="🌿 SomaFM Groove Salad", value="groove"),
+    discord.app_commands.Choice(name="🌙 SomaFM Lush", value="lush"),
+    discord.app_commands.Choice(name="📻 Lihat Daftar Stasiun", value="list"),
+])
+async def slash_lofi(interaction: discord.Interaction, stasiun: str = "lofi"):
+    import shutil
+    if stasiun == "list":
         lines = "\n".join(f"• `{k}` — {t}" for k, t, _ in LOFI_STATIONS)
-        await msg.reply(embed=discord.Embed(title="📻 Daftar Stasiun Lofi", description=lines, colour=0x9B59B6),
-                        mention_author=False)
+        await interaction.response.send_message(embed=discord.Embed(title="📻 Daftar Stasiun Lofi", description=lines, colour=0x9B59B6))
         return
-
-    station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
-    if cmd == "!lofi" and (not arg or arg.lower() in station_keys):
-        vc = await _ensure_voice(msg)
+    await interaction.response.defer()
+    try:
+        vc = await _ensure_voice(interaction.guild, interaction.user, interaction.channel, interaction.followup.send)
         if not vc:
             return
-        idx = station_keys.get(arg.lower(), LOFI_STATE["idx"])
+        station_keys = {k: i for i, (k, _t, _u) in enumerate(LOFI_STATIONS)}
+        idx = station_keys.get(stasiun, LOFI_STATE["idx"])
         title = _play_station(vc, idx)
-        await msg.reply(embed=_lofi_embed(title, vc.channel.name), view=LofiView(), mention_author=False)
+        await interaction.followup.send(embed=_lofi_embed(title, vc.channel.name), view=LofiView())
         await asyncio.sleep(2.5)
         if vc.is_connected() and not vc.is_playing():
-            await msg.channel.send(
+            await interaction.channel.send(
                 f"⚠️ Stream `{title}` langsung berhenti (`opus={discord.opus.is_loaded()}`, `ffmpeg={bool(shutil.which('ffmpeg'))}`). "
-                f"Coba `!lofi next` untuk ganti stasiun."
+                f"Coba `/skip` untuk ganti stasiun."
             )
-        return
+    except Exception as exc:
+        log("lofi error:", exc)
+        await interaction.followup.send(f"❌ Gagal memutar lofi: `{str(exc)[:180]}`")
 
-    query = arg
-    if not query:
-        await msg.reply("🔎 Tulis judul lagunya, contoh: `!play lofi hip hop` atau `!play judul lagu`", mention_author=False)
+
+@tree.command(name="skip", description="Skip lagu saat ini atau ganti stasiun lofi", guild=discord.Object(id=GUILD_ID))
+async def slash_skip(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if not vc or not vc.is_connected():
+        await interaction.response.send_message("🔇 Bot tidak sedang di voice.", ephemeral=True)
         return
-    vc = await _ensure_voice(msg)
-    if not vc:
-        return
-    async with msg.channel.typing():
-        track = await asyncio.to_thread(_search_track, query)
-    track["requester"] = msg.author.display_name
-    if vc.is_playing() or vc.is_paused():
-        MUSIC_QUEUE.append(track)
-        await msg.reply(f"➕ Ditambahkan ke antrian (#{len(MUSIC_QUEUE)}): **{track['title']}**", mention_author=False)
+    if MUSIC_QUEUE:
+        vc.stop()
+        await interaction.response.send_message("⏭️ Skip ke lagu berikutnya.")
     else:
-        MUSIC_QUEUE.append(track)
-        _play_next_in_queue(guild, msg.channel)
-        await msg.reply(embed=_music_embed(track, vc.channel.name), view=LofiView(), mention_author=False)
+        title = _play_station(vc, LOFI_STATE["idx"] + 1)
+        await interaction.response.send_message(embed=_lofi_embed(title, vc.channel.name), view=LofiView())
+
+
+@tree.command(name="queue", description="Lihat daftar antrian lagu saat ini", guild=discord.Object(id=GUILD_ID))
+async def slash_queue(interaction: discord.Interaction):
+    cur = NOW_PLAYING.get("track")
+    lines = [f"**Sedang diputar:** {cur['title']}" if cur else "**Sedang diputar:** tidak ada"]
+    for i, t in enumerate(MUSIC_QUEUE[:10], 1):
+        lines.append(f"`{i}.` {t['title']}")
+    await interaction.response.send_message(embed=discord.Embed(title="🎶 Antrian Lagu", description="\n".join(lines), colour=0x9B59B6))
+
+
+@tree.command(name="stop", description="Matikan musik dan keluarkan bot dari voice channel", guild=discord.Object(id=GUILD_ID))
+async def slash_stop(interaction: discord.Interaction):
+    MUSIC_QUEUE.clear()
+    NOW_PLAYING["track"] = None
+    vc = interaction.guild.voice_client
+    if not vc:
+        await interaction.response.send_message("🔇 Bot tidak sedang di voice channel.", ephemeral=True)
+        return
+    vc.stop()
+    await vc.disconnect()
+    await interaction.response.send_message("⏹️ Musik dimatikan & keluar dari voice.")
 
 
 async def background_qa_and_autorole():
@@ -1861,13 +1873,6 @@ async def on_message(msg):
         if VOICE_LOGS:
             info.append("```text\n" + "\n".join(list(VOICE_LOGS)[-12:]) + "\n```")
         await msg.reply("\n".join(info), mention_author=False)
-        return
-    if cmd_word in ("!lofi", "!play", "!p", "!skip", "!next", "!queue", "!q", "!stop", "!leave"):
-        try:
-            await handle_music_command(msg, text)
-        except Exception as exc:
-            log("music error:", exc)
-            await msg.reply(f"❌ Gagal memutar audio: `{str(exc)[:180]}`", mention_author=False)
         return
     if cmd_word in ("!help", "!bantuan"):
         await msg.reply(embed=_help_embed(msg.author), mention_author=False)
