@@ -325,6 +325,9 @@ class FounderQuickRoleSelect(discord.ui.RoleSelect):
         if not role or role.is_default() or role.managed:
             await interaction.response.send_message("❌ Role tersebut tidak bisa dipasang manual.", ephemeral=True)
             return
+        if role.id == FOUNDER_ROLE_ID:
+            await interaction.response.send_message("❌ Role **Founder** eksklusif dan tidak bisa diberikan ke siapapun.", ephemeral=True)
+            return
         ok, fail = [], []
         for uid in self.target_ids:
             m = interaction.guild.get_member(uid)
@@ -360,6 +363,9 @@ class FounderRoleMemberSelect(discord.ui.UserSelect):
         super().__init__(placeholder="Pilih orang atau bot...", min_values=1, max_values=10)
 
     async def callback(self, interaction: discord.Interaction):
+        if self.role.id == FOUNDER_ROLE_ID and (interaction.user.id != OWNER_ID or (self.give and any(u.id != OWNER_ID for u in self.values))):
+            await interaction.response.send_message("❌ Role **Founder** eksklusif dan hanya boleh dimiliki oleh Owner.", ephemeral=True)
+            return
         ok = []
         for u in self.values:
             member = interaction.guild.get_member(u.id)
@@ -417,6 +423,9 @@ class FounderRoleSelect(discord.ui.RoleSelect):
         role = interaction.guild.get_role(self.values[0].id)
         if not role or role.is_default():
             await interaction.response.send_message("❌ Role tidak bisa dikelola.", ephemeral=True)
+            return
+        if role.id == FOUNDER_ROLE_ID and interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("❌ Role **Founder** hanya bisa dikelola oleh Owner.", ephemeral=True)
             return
         await interaction.response.send_message(
             f"⚙️ Kelola role {role.mention}:", view=FounderRoleActionView(role), ephemeral=True
