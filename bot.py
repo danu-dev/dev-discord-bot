@@ -829,12 +829,42 @@ def _award_xp(user_id):
     return new_lvl if new_lvl > old_lvl else None
 
 
+ML_RANK_TIERS = [
+    (2,  "⚔️ ╎ Warrior",           1573531049366003732),
+    (4,  "🛡️ ╎ Elite",             1573531055519043734),
+    (6,  "🎖️ ╎ Master",            1573531059151175680),
+    (8,  "💠 ╎ Grandmaster",       1573531062955540528),
+    (10, "🔮 ╎ Epic",              1573531068903194747),
+    (13, "🦁 ╎ ML Legend",         1573531073646960720),
+    (16, "🐉 ╎ Mythic",            1573531076872110123),
+    (20, "👑 ╎ Mythical Honor",    1573531080152186931),
+    (25, "🔥 ╎ Mythical Glory",    1573531084359204894),
+    (30, "⚡ ╎ Mythical Immortal", 1573531088284819506),
+]
+
+
+def _ml_rank_for_level(lvl):
+    tier = None
+    for req, name, rid in ML_RANK_TIERS:
+        if lvl >= req:
+            tier = (req, name, rid)
+    if not tier:
+        return "Unranked", None
+    req, name, rid = tier
+    if lvl >= 30:
+        stars = lvl - 29
+        return f"{name} ★{stars}", rid
+    return name, rid
+
+
 def _rank_embed(member):
     xp = XP_DATA.get(str(member.id), 0)
     lvl = _xp_level(xp)
     next_xp = (lvl + 1) * (lvl + 1) * 100
+    rank_label, _ = _ml_rank_for_level(lvl)
     e = discord.Embed(title=f"🏅 ╎ Rank {member.display_name}", colour=GOLD)
     e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name="Rank ML", value=f"**{rank_label}**", inline=True)
     e.add_field(name="Level", value=f"**{lvl}**", inline=True)
     e.add_field(name="XP", value=f"**{xp}** / {next_xp}", inline=True)
     return e
@@ -846,7 +876,9 @@ def _leaderboard_embed(guild):
     for i, (uid, xp) in enumerate(top, 1):
         m = guild.get_member(int(uid))
         name = m.display_name if m else f"User {uid}"
-        lines.append(f"`{i}.` **{name}** — Level **{_xp_level(xp)}** ({xp} XP)")
+        lvl = _xp_level(xp)
+        rank_label, _ = _ml_rank_for_level(lvl)
+        lines.append(f"`{i}.` **{name}** — {rank_label} (Lv.**{lvl}** • {xp} XP)")
     return discord.Embed(
         title=f"🏆 ╎ Leaderboard {guild.name}",
         description="\n".join(lines) or "Belum ada data XP.",
@@ -1546,16 +1578,22 @@ async def on_message(msg):
         return
     new_lvl = _award_xp(msg.author.id)
     if new_lvl is not None:
+        rank_label, target_rid = _ml_rank_for_level(new_lvl)
         reward_txt = ""
-        for req_lvl, rid in ((5, 1573523699586572401), (10, 1573523694574116914)):
-            if new_lvl >= req_lvl:
-                r = msg.guild.get_role(rid)
-                if r and r not in msg.author.roles:
-                    try:
-                        await msg.author.add_roles(r, reason=f"Reward naik Level {new_lvl}")
-                        reward_txt += f"\n🎁 Kamu dapat role baru: **{r.name}**!"
-                    except Exception:
-                        pass
+        if target_rid:
+            ml_ids = {rid for _, _, rid in ML_RANK_TIERS}
+            old_roles = [r for r in msg.author.roles if r.id in ml_ids and r.id != target_rid]
+            new_role = msg.guild.get_role(target_rid)
+            try:
+                if old_roles:
+                    await msg.author.remove_roles(*old_roles, reason=f"Naik ke {rank_label}")
+                if new_role and new_role not in msg.author.roles:
+                    await msg.author.add_roles(new_role, reason=f"Reward naik Level {new_lvl}")
+                    reward_txt = f"\n🏅 Rank baru terbuka: **{rank_label}**!"
+                elif new_lvl >= 30:
+                    reward_txt = f"\n⭐ Rank kamu sekarang: **{rank_label}**!"
+            except Exception:
+                pass
         try:
             await msg.channel.send(f"🎉 Selamat {msg.author.mention}, kamu naik ke **Level {new_lvl}**!{reward_txt}")
         except Exception:
