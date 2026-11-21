@@ -31,8 +31,8 @@ def _help_embed(member):
     if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
-            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/giveaway`\n"
-                  "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!reset` • Mention bot untuk AI",
+            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/giveaway` • `/panel-verify`\n"
+                  "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!panel-verify` • `!test-welcome` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
     e.set_footer(text=f"{member.guild.name} • Ketik / untuk melihat semua slash command")

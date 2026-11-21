@@ -19,6 +19,10 @@ from bot_modules.music import (
     MUSIC_QUEUE, NOW_PLAYING, VOICE_LOGS, LofiView, NextMusicView,
 )
 from bot_modules.founder_panel import FounderManageView, _ensure_founder_panel
+from bot_modules.welcome import (
+    VERIFY_CONFIG, _save_verify_config, is_verify_enabled,
+    build_welcome_card, welcome_embed, VerifyView, verify_panel_embed, RULES_CHANNEL_ID,
+)
 
 
 @client.event
@@ -132,14 +136,15 @@ async def background_qa_and_autorole():
         try:
             guild = client.get_guild(GUILD_ID)
             if guild:
-                member_role = guild.get_role(MEMBER_ROLE_ID)
-                if member_role:
-                    for m in guild.members:
-                        if not m.bot and member_role not in m.roles:
-                            try:
-                                await m.add_roles(member_role, reason="Auto-assign role Member")
-                            except Exception:
-                                pass
+                if not is_verify_enabled():
+                    member_role = guild.get_role(MEMBER_ROLE_ID)
+                    if member_role:
+                        for m in guild.members:
+                            if not m.bot and member_role not in m.roles:
+                                try:
+                                    await m.add_roles(member_role, reason="Auto-assign role Member")
+                                except Exception:
+                                    pass
                 await _update_server_counters(guild)
         except Exception as exc:
             log("bg loop error:", exc)
@@ -184,6 +189,7 @@ async def on_ready():
     client.add_view(GiveawayView())
     client.add_view(TempVoiceView())
     client.add_view(ShopView())
+    client.add_view(VerifyView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
@@ -224,12 +230,13 @@ async def on_member_join(member):
         inviter_member = member.guild.get_member(inviter_id)
         if inviter_member:
             await _grant_bonus_xp(member.guild, inviter_member, 50)
-    role = member.guild.get_role(MEMBER_ROLE_ID)
-    if role and role not in member.roles:
-        try:
-            await member.add_roles(role, reason="Auto-role Member saat join")
-        except Exception:
-            pass
+    if not is_verify_enabled():
+        role = member.guild.get_role(MEMBER_ROLE_ID)
+        if role and role not in member.roles:
+            try:
+                await member.add_roles(role, reason="Auto-role Member saat join")
+            except Exception:
+                pass
     inv_txt = f"\nDiundang oleh: <@{inviter_id}> (+100 Koin, +50 XP)" if inviter_id else ""
     await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`){inv_txt}", GREEN)
     ch = member.guild.get_channel(WELCOME_CHANNEL) or discord.utils.find(
@@ -237,19 +244,8 @@ async def on_member_join(member):
         member.guild.channels,
     )
     if ch:
-        e = discord.Embed(
-            title="👋 ╎ Member Baru Bergabung!",
-            description=(
-                f"Selamat datang {member.mention} di **{member.guild.name}**! 🎉\n"
-                f"• Baca aturan di <#1573525422585684185>\n"
-                f"• Ambil role di <#1573524001240780820>\n"
-                f"• Mulai ngobrol di <#1573525427228516382>"
-            ),
-            colour=0xEB459E,
-        )
-        e.set_thumbnail(url=member.display_avatar.url)
-        e.set_footer(text=f"Member ke-{member.guild.member_count}")
-        await ch.send(embed=e)
+        card_buf = await build_welcome_card(member)
+        await ch.send(embed=welcome_embed(member), file=discord.File(card_buf, filename="welcome.png"))
 
 
 @client.event
@@ -446,6 +442,18 @@ async def on_message(msg):
         await g.send(embed=e, view=TicketLauncherView())
         if g.id != msg.channel.id:
             await msg.reply(f"✅ Panel ticket dikirim ke {g.mention}.", mention_author=False)
+        return
+    if low == "!panel-verify":
+        r_ch = guild.get_channel(RULES_CHANNEL_ID) or msg.channel
+        VERIFY_CONFIG["enabled"] = True
+        _save_verify_config()
+        await r_ch.send(embed=verify_panel_embed(guild), view=VerifyView())
+        if r_ch.id != msg.channel.id:
+            await msg.reply(f"✅ Panel verifikasi dikirim ke {r_ch.mention} (mode verifikasi aktif).", mention_author=False)
+        return
+    if low == "!test-welcome":
+        card_buf = await build_welcome_card(msg.author)
+        await msg.reply(embed=welcome_embed(msg.author), file=discord.File(card_buf, filename="welcome.png"), mention_author=False)
         return
     if low == "!stats":
         g = guild
