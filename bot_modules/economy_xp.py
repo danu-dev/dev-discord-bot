@@ -1,4 +1,5 @@
 from bot_modules.core import *
+from bot_modules.core import _send_modlog
 
 # --- XP & Leveling --------------------------------------------------------
 XP_DATA = {}

@@ -1,4 +1,5 @@
 from bot_modules.core import *
+from bot_modules.core import _has_mod_perm, _parse_target_id, _send_modlog
 from bot_modules.economy_xp import _rng, _grant_bonus_xp
 
 def _help_embed(member):

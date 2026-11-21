@@ -2,6 +2,7 @@
 """DEV server Discord bot — modular entry point."""
 
 from bot_modules.core import *
+from bot_modules.core import _has_mod_perm, _parse_target_id, _send_modlog
 from bot_modules.ai_admin import (
     CHAT_HISTORY, _save_memory, server_summary, ai_plan, describe, PlanView, qa_embed, live_tests,
 )
