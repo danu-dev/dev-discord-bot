@@ -1564,12 +1564,20 @@ class BuatChannelModal(discord.ui.Modal, title="Buat Channel & Isi Pesan"):
                 guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
             }
         try:
-            ch = await guild.create_text_channel(
-                name=self.channel_name[:100],
-                category=cat,
-                overwrites=overwrites or discord.utils.MISSING,
-                reason=f"/buat oleh {interaction.user}",
-            )
+            target_name = self.channel_name[:100].strip().lower()
+            pool = cat.text_channels if cat else guild.text_channels
+            ch = discord.utils.find(lambda c: c.name.lower() == target_name, pool)
+            if ch is None and cat is not None:
+                ch = discord.utils.find(lambda c: c.name.lower() == target_name, guild.text_channels)
+            created = False
+            if ch is None:
+                ch = await guild.create_text_channel(
+                    name=self.channel_name[:100],
+                    category=cat,
+                    overwrites=overwrites or discord.utils.MISSING,
+                    reason=f"/buat oleh {interaction.user}",
+                )
+                created = True
             sent_count = await _send_custom_post(ch, self.isi_pesan.value)
         except discord.Forbidden:
             await interaction.followup.send("❌ Bot tidak punya izin membuat channel atau mengirim pesan.", ephemeral=True)
@@ -1578,11 +1586,17 @@ class BuatChannelModal(discord.ui.Modal, title="Buat Channel & Isi Pesan"):
             await interaction.followup.send(f"❌ Gagal: `{exc}`", ephemeral=True)
             return
 
-        cat_info = f" di kategori **{cat.name}**" if cat else ""
-        await interaction.followup.send(
-            f"✅ Channel {ch.mention} berhasil dibuat{cat_info} & diisi ({sent_count} pesan).",
-            ephemeral=True,
-        )
+        if created:
+            cat_info = f" di kategori **{cat.name}**" if cat else ""
+            await interaction.followup.send(
+                f"✅ Channel {ch.mention} berhasil dibuat{cat_info} & diisi ({sent_count} pesan).",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"✅ Channel {ch.mention} sudah ada, pesan langsung dikirim ({sent_count} pesan).",
+                ephemeral=True,
+            )
 
 
 @tree.command(name="buat", description="Buat channel baru + langsung paste isi pesannya (gampang)", guild=discord.Object(id=GUILD_ID))
