@@ -630,7 +630,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🏅 Rank & Level ML",
-        value="`/rank` • `/ranks` • `/leaderboard`",
+        value="`/rank` • `/ranks` • `/leaderboard` • `/daily`",
         inline=False,
     )
     e.add_field(
@@ -640,7 +640,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🛠️ Komunitas & Info",
-        value="`/help` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        value="`/help` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
         inline=False,
     )
     e.add_field(
@@ -1036,6 +1036,58 @@ async def slash_coinflip(interaction: discord.Interaction, tebak: discord.app_co
         await interaction.response.send_message(f"Hasil: **{label}** — 🎉 **Tebakanmu benar!** (+{bonus} XP){lvl_msg}")
     else:
         await interaction.response.send_message(f"Hasil: **{label}** — 😅 Meleset!")
+
+
+CONFESS_CHANNEL = 1573535779546734624
+DAILY_FILE = os.environ.get("DAILY_FILE", "dev-daily-data.json")
+DAILY_DATA = {}
+if os.path.exists(DAILY_FILE):
+    try:
+        DAILY_DATA = json.loads(read(DAILY_FILE))
+    except Exception:
+        DAILY_DATA = {}
+
+
+def _save_daily():
+    try:
+        with open(DAILY_FILE, "w", encoding="utf-8") as fh:
+            json.dump(DAILY_DATA, fh)
+    except Exception:
+        pass
+
+
+@tree.command(name="daily", description="Klaim bonus XP harian (ada bonus streak!)", guild=discord.Object(id=GUILD_ID))
+async def slash_daily(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    now = time.time()
+    rec = DAILY_DATA.get(uid, {"last": 0, "streak": 0})
+    elapsed = now - rec.get("last", 0)
+    if elapsed < 86400:
+        left = int(86400 - elapsed)
+        hrs, rem = divmod(left, 3600)
+        mins = rem // 60
+        await interaction.response.send_message(f"⏳ Kamu sudah klaim `/daily` hari ini! Coba lagi dalam **{hrs}j {mins}m**.", ephemeral=True)
+        return
+    streak = rec.get("streak", 0) + 1 if elapsed < 172800 else 1
+    DAILY_DATA[uid] = {"last": now, "streak": streak}
+    _save_daily()
+    bonus = 50 + min((streak - 1) * 15, 150)
+    lvl_msg = await _grant_bonus_xp(interaction.guild, interaction.user, bonus)
+    await interaction.response.send_message(f"🎁 **Daily Claim!** +**{bonus} XP** (🔥 Streak: **{streak} hari**){lvl_msg}")
+
+
+@tree.command(name="confess", description="Kirim pesan anonim ke #🤫╎confess", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(pesan="Pesan atau curhatan anonim kamu")
+async def slash_confess(interaction: discord.Interaction, pesan: str):
+    ch = interaction.guild.get_channel(CONFESS_CHANNEL)
+    if not ch:
+        await interaction.response.send_message("❌ Channel confess tidak ditemukan.", ephemeral=True)
+        return
+    e = discord.Embed(title="🤫 ╎ Confess Anonim", description=pesan[:2000], colour=0x9B59B6)
+    e.set_footer(text="Gunakan /confess untuk mengirim pesan anonim")
+    await ch.send(embed=e)
+    await _send_modlog(interaction.guild, "🤫 Confess Masuk", f"Pengirim: {interaction.user.mention} (`{interaction.user.id}`)\nIsi: {pesan[:500]}", 0x9B59B6)
+    await interaction.response.send_message(f"✅ Confess kamu sudah dikirim secara anonim ke {ch.mention}!", ephemeral=True)
 
 
 @tree.command(name="tebakangka", description="Tebak angka 1 sampai 10", guild=discord.Object(id=GUILD_ID))
@@ -1737,6 +1789,19 @@ async def on_member_join(member):
 async def on_message(msg):
     if msg.author.bot or not msg.guild or msg.guild.id != GUILD_ID:
         return
+    if not _has_mod_perm(msg.author, "manage_messages"):
+        low_msg = msg.content.lower()
+        has_invite = any(d in low_msg for d in ("discord.gg/", "discord.com/invite/", "discordapp.com/invite/"))
+        too_many_mentions = len(msg.mentions) >= 6 or msg.mention_everyone
+        if has_invite or too_many_mentions:
+            reason_mod = "Link invite server lain" if has_invite else "Spam mention berlebihan"
+            try:
+                await msg.delete()
+                await msg.channel.send(f"🛡️ {msg.author.mention}, pesan dihapus otomatis (**{reason_mod}**).", delete_after=5)
+            except Exception:
+                pass
+            await _send_modlog(msg.guild, "🛡️ Auto-Mod", f"Pelaku: {msg.author.mention}\nChannel: {msg.channel.mention}\nAlasan: {reason_mod}", RED)
+            return
     new_lvl = _award_xp(msg.author.id)
     if new_lvl is not None:
         rank_label, target_rid = _ml_rank_for_level(new_lvl)
