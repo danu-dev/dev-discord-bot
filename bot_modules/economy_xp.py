@@ -314,6 +314,7 @@ if os.path.exists(ECONOMY_FILE):
         if isinstance(_loaded_eco, dict):
             ECONOMY_DATA["coins"] = _loaded_eco.get("coins", {})
             ECONOMY_DATA["invites"] = _loaded_eco.get("invites", {})
+            ECONOMY_DATA["work_cd"] = _loaded_eco.get("work_cd", {})
     except Exception:
         pass
 
@@ -428,6 +429,296 @@ async def slash_givekoin(interaction: discord.Interaction, member: discord.Membe
         return
     new_bal = _add_coins(member.id, jumlah)
     await interaction.response.send_message(f"🪙 Saldo {member.mention} sekarang **{new_bal} Koin**.")
+
+
+# --- Casino Mini-Games (Blackjack & Roulette) -------------------------------
+_SUITS = ("♠", "♥", "♦", "♣")
+_RANKS = ("A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K")
+_ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+
+
+def _bj_value(hand):
+    total = 0
+    aces = 0
+    for rank, _suit in hand:
+        if rank == "A":
+            total += 11
+            aces += 1
+        elif rank in ("J", "Q", "K"):
+            total += 10
+        else:
+            total += int(rank)
+    while total > 21 and aces > 0:
+        total -= 10
+        aces -= 1
+    return total
+
+
+def _bj_fmt(hand, hide_second=False):
+    if hide_second and len(hand) >= 2:
+        return f"`{hand[0][0]}{hand[0][1]}` `??`"
+    return " ".join(f"`{r}{s}`" for r, s in hand)
+
+
+class BlackjackView(discord.ui.View):
+    def __init__(self, user_id, bet, deck, player_hand, dealer_hand):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.bet = bet
+        self.deck = deck
+        self.player_hand = player_hand
+        self.dealer_hand = dealer_hand
+        self.finished = False
+
+    def _embed(self, status_text=None, reveal=False, colour=GOLD):
+        p_val = _bj_value(self.player_hand)
+        d_val = _bj_value(self.dealer_hand) if reveal else "?"
+        e = discord.Embed(title=f"🃏 ╎ Blackjack (Taruhan: {self.bet} Koin)", colour=colour)
+        e.add_field(name=f"Kartu Kamu ({p_val})", value=_bj_fmt(self.player_hand), inline=False)
+        e.add_field(name=f"Kartu Dealer ({d_val})", value=_bj_fmt(self.dealer_hand, hide_second=not reveal), inline=False)
+        if status_text:
+            e.description = status_text
+        e.set_footer(text=f"Saldo sekarang: {_get_coins(self.user_id)} Koin")
+        return e
+
+    def _finish_stand(self):
+        self.finished = True
+        for item in self.children:
+            item.disabled = True
+        while _bj_value(self.dealer_hand) < 17 and self.deck:
+            self.dealer_hand.append(self.deck.pop())
+        p_val = _bj_value(self.player_hand)
+        d_val = _bj_value(self.dealer_hand)
+        if p_val > 21:
+            return self._embed(f"💥 **Bust!** Kamu kalah **{self.bet} Koin**.", reveal=True, colour=RED)
+        if d_val > 21 or p_val > d_val:
+            payout = self.bet * 2
+            _add_coins(self.user_id, payout)
+            return self._embed(f"🎉 **Menang!** Kamu dapat **+{payout} Koin** (untung +{self.bet})!", reveal=True, colour=GREEN)
+        if p_val == d_val:
+            _add_coins(self.user_id, self.bet)
+            return self._embed(f"🤝 **Seri (Push)!** Taruhan **{self.bet} Koin** dikembalikan.", reveal=True, colour=BLURPLE)
+        return self._embed(f"😈 **Dealer Menang!** Kamu kalah **{self.bet} Koin**.", reveal=True, colour=RED)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Ini meja Blackjack milik orang lain!", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Hit", emoji="🃏", style=discord.ButtonStyle.primary)
+    async def hit_btn(self, interaction: discord.Interaction, _b):
+        if self.finished:
+            return
+        self.double_btn.disabled = True
+        self.player_hand.append(self.deck.pop())
+        p_val = _bj_value(self.player_hand)
+        if p_val > 21:
+            self.finished = True
+            for item in self.children:
+                item.disabled = True
+            await interaction.response.edit_message(
+                embed=self._embed(f"💥 **Bust ({p_val})!** Kamu kalah **{self.bet} Koin**.", reveal=True, colour=RED),
+                view=self,
+            )
+        elif p_val == 21:
+            embed = self._finish_stand()
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(label="Stand", emoji="🛑", style=discord.ButtonStyle.secondary)
+    async def stand_btn(self, interaction: discord.Interaction, _b):
+        if self.finished:
+            return
+        embed = self._finish_stand()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Double Down", emoji="💰", style=discord.ButtonStyle.success)
+    async def double_btn(self, interaction: discord.Interaction, _b):
+        if self.finished or len(self.player_hand) != 2:
+            return
+        if _get_coins(self.user_id) < self.bet:
+            await interaction.response.send_message(f"❌ Koin kurang untuk Double Down (butuh **{self.bet}** lagi).", ephemeral=True)
+            return
+        _add_coins(self.user_id, -self.bet)
+        self.bet *= 2
+        self.player_hand.append(self.deck.pop())
+        embed = self._finish_stand()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
+@tree.command(name="blackjack", description="Main Blackjack pakai Koin (menang 2x, Blackjack 2.5x!)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(taruhan="Jumlah koin yang dipertaruhkan (10 - 5000)")
+async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
+    if not 10 <= taruhan <= 5000:
+        await interaction.response.send_message("❌ Taruhan harus antara **10 sampai 5000 Koin**.", ephemeral=True)
+        return
+    bal = _get_coins(interaction.user.id)
+    if bal < taruhan:
+        await interaction.response.send_message(f"❌ Koin kamu kurang! Saldo saat ini: **{bal} Koin**.", ephemeral=True)
+        return
+    wait = _check_game_cd(interaction.user.id, "blackjack")
+    if wait:
+        await interaction.response.send_message(f"⏳ Jangan spam! Tunggu **{wait} detik** lagi sebelum main `/blackjack`.", ephemeral=True)
+        return
+    _add_coins(interaction.user.id, -taruhan)
+    deck = [(r, s) for s in _SUITS for r in _RANKS]
+    _rng.shuffle(deck)
+    p_hand = [deck.pop(), deck.pop()]
+    d_hand = [deck.pop(), deck.pop()]
+    view = BlackjackView(interaction.user.id, taruhan, deck, p_hand, d_hand)
+    p_val, d_val = _bj_value(p_hand), _bj_value(d_hand)
+    if p_val == 21 or d_val == 21:
+        view.finished = True
+        for item in view.children:
+            item.disabled = True
+        if p_val == 21 and d_val == 21:
+            _add_coins(interaction.user.id, taruhan)
+            emb = view._embed(f"🤝 **Seri (Sama-sama Blackjack)!** Taruhan **{taruhan} Koin** dikembalikan.", reveal=True, colour=BLURPLE)
+        elif p_val == 21:
+            payout = int(taruhan * 2.5)
+            _add_coins(interaction.user.id, payout)
+            emb = view._embed(f"👑 **BLACKJACK!** Kamu menang **+{payout} Koin**!", reveal=True, colour=GREEN)
+        else:
+            emb = view._embed(f"😈 **Dealer Blackjack!** Kamu kalah **{taruhan} Koin**.", reveal=True, colour=RED)
+        await interaction.response.send_message(embed=emb, view=view)
+        return
+    await interaction.response.send_message(embed=view._embed("Pilih **Hit**, **Stand**, atau **Double Down**:"), view=view)
+
+
+@tree.command(name="roulette", description="Putar Roulette pakai Koin (merah/hitam/genap/ganjil/1-18/19-36/angka 0-36)", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(
+    taruhan="Jumlah koin yang dipertaruhkan (10 - 5000)",
+    pilihan="Pilih: merah, hitam, genap, ganjil, 1-18, 19-36, hijau, atau angka 0-36",
+)
+async def slash_roulette(interaction: discord.Interaction, taruhan: int, pilihan: str):
+    if not 10 <= taruhan <= 5000:
+        await interaction.response.send_message("❌ Taruhan harus antara **10 sampai 5000 Koin**.", ephemeral=True)
+        return
+    pick = pilihan.strip().lower()
+    aliases = {
+        "red": "merah", "black": "hitam", "even": "genap", "odd": "ganjil",
+        "low": "1-18", "high": "19-36", "green": "hijau",
+    }
+    pick = aliases.get(pick, pick)
+    is_num = pick.isdigit() and 0 <= int(pick) <= 36
+    valid_bets = {"merah", "hitam", "genap", "ganjil", "1-18", "19-36", "hijau"}
+    if not is_num and pick not in valid_bets:
+        await interaction.response.send_message(
+            "❌ Pilihan tidak valid! Gunakan: `merah`, `hitam`, `genap`, `ganjil`, `1-18`, `19-36`, `hijau`, atau angka `0`-`36`.",
+            ephemeral=True,
+        )
+        return
+    bal = _get_coins(interaction.user.id)
+    if bal < taruhan:
+        await interaction.response.send_message(f"❌ Koin kamu kurang! Saldo saat ini: **{bal} Koin**.", ephemeral=True)
+        return
+    wait = _check_game_cd(interaction.user.id, "roulette")
+    if wait:
+        await interaction.response.send_message(f"⏳ Tunggu **{wait} detik** lagi sebelum memutar Roulette.", ephemeral=True)
+        return
+    _add_coins(interaction.user.id, -taruhan)
+    num = _rng.randint(0, 36)
+    color_emoji = "🟢" if num == 0 else ("🔴" if num in _ROULETTE_RED else "⚫")
+    color_name = "Hijau" if num == 0 else ("Merah" if num in _ROULETTE_RED else "Hitam")
+    won = False
+    mult = 2
+    if is_num:
+        won = (num == int(pick))
+        mult = 36
+    elif pick == "hijau":
+        won = (num == 0)
+        mult = 36
+    elif pick == "merah":
+        won = (num in _ROULETTE_RED)
+    elif pick == "hitam":
+        won = (num != 0 and num not in _ROULETTE_RED)
+    elif pick == "genap":
+        won = (num != 0 and num % 2 == 0)
+    elif pick == "ganjil":
+        won = (num % 2 == 1)
+    elif pick == "1-18":
+        won = (1 <= num <= 18)
+    elif pick == "19-36":
+        won = (19 <= num <= 36)
+
+    if won:
+        payout = taruhan * mult
+        _add_coins(interaction.user.id, payout)
+        res_txt = f"🎉 **MENANG!** Kamu dapat **+{payout} Koin** (`{mult}x`)!"
+        col = GREEN
+    else:
+        res_txt = f"💸 **Kalah!** Kamu kehilangan **{taruhan} Koin**."
+        col = RED
+
+    e = discord.Embed(
+        title="🎡 ╎ Roulette",
+        description=f"Bola berhenti di: {color_emoji} **{num} ({color_name})**\nPilihanmu: **`{pilihan}`** • Taruhan: **{taruhan} Koin**\n\n{res_txt}",
+        colour=col,
+    )
+    e.set_footer(text=f"Saldo sekarang: {_get_coins(interaction.user.id)} Koin • Beli role di /shop!")
+    await interaction.response.send_message(embed=e)
+
+
+WORK_CD_SECONDS = 300  # 5 menit cooldown
+_WORK_JOBS = [
+    ("🎮 Joki Rank ML", 45, 95),
+    ("🎥 Streamer Gaming", 40, 110),
+    ("🎬 Editor Clip Mabar", 35, 85),
+    ("🛠️ Teknisi Rakit PC", 50, 100),
+    ("🎙️ Caster Turnamen", 55, 115),
+    ("🐛 Bug Hunter Bot", 40, 90),
+    ("🎧 DJ Radio Lounge", 35, 80),
+]
+_WORK_JACKPOTS = [
+    ("🏆 Juara Mini Turnamen", 130, 200),
+    ("💸 Dapet Donasi Sultan pas Live", 120, 180),
+]
+_WORK_UNLUCKY = [
+    ("📶 Wifi putus pas lagi joki, cuma dapet uang lelah", 10, 25),
+    ("⌨️ Keyboard error pas ngedit, bayaran dipotong", 15, 30),
+]
+
+
+@tree.command(name="kerja", description="Kerja random (RNG) untuk dapat Koin — cooldown 5 menit", guild=discord.Object(id=GUILD_ID))
+async def slash_kerja(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    work_cd_map = ECONOMY_DATA.setdefault("work_cd", {})
+    now = time.time()
+    last = float(work_cd_map.get(uid, 0))
+    elapsed = now - last
+    if elapsed < WORK_CD_SECONDS:
+        left = int(WORK_CD_SECONDS - elapsed) + 1
+        mins, secs = divmod(left, 60)
+        await interaction.response.send_message(
+            f"⏳ Capek bro, jangan spam! Bisa `/kerja` lagi dalam **{mins}m {secs}d**.",
+            ephemeral=True,
+        )
+        return
+    work_cd_map[uid] = now
+    roll = _rng.random()
+    if roll < 0.15:
+        job_name, lo, hi = _rng.choice(_WORK_JACKPOTS)
+        tag = "🌟 **JACKPOT!**"
+        col = GOLD
+    elif roll < 0.25:
+        job_name, lo, hi = _rng.choice(_WORK_UNLUCKY)
+        tag = "😅 **Kurang Beruntung...**"
+        col = RED
+    else:
+        job_name, lo, hi = _rng.choice(_WORK_JOBS)
+        tag = "💼 **Selesai Kerja!**"
+        col = GREEN
+    earned = _rng.randint(lo, hi)
+    new_bal = _add_coins(interaction.user.id, earned)
+    e = discord.Embed(
+        title=f"{tag}",
+        description=f"Pekerjaan: **{job_name}**\nBayaran: **+{earned} Koin**",
+        colour=col,
+    )
+    e.set_footer(text=f"Saldo sekarang: {new_bal} Koin • Cooldown 5 menit")
+    await interaction.response.send_message(embed=e)
 
 
 INVITE_CACHE = {}

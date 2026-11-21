@@ -14,8 +14,8 @@ def _help_embed(member):
         inline=False,
     )
     e.add_field(
-        name="🎮 Mini-Games (Bonus XP)",
-        value="`/suit` • `/coinflip` • `/tebakangka`",
+        name="🎮 Mini-Games & Kasino (XP & Koin)",
+        value="`/kerja` • `/suit` • `/coinflip` • `/tebakangka` • `/blackjack` • `/roulette`",
         inline=False,
     )
     e.add_field(

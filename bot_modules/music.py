@@ -90,17 +90,19 @@ def _make_audio_source(url, headers=None):
             before.append(f'-headers "{hdr}"')
     before_str = " ".join(before) or None
     if discord.opus.is_loaded():
-        return discord.FFmpegPCMAudio(url, before_options=before_str, options="-vn")
-    return discord.FFmpegOpusAudio(url, before_options=before_str, options="-vn")
+        return discord.FFmpegPCMAudio(url, before_options=before_str, options="-vn -ar 48000 -ac 2")
+    return discord.FFmpegOpusAudio(url, before_options=before_str, options="-vn -ar 48000 -ac 2")
 
 
-_MUSIC_ENCODER_OPTS = {
-    "application": "audio",
-    "bitrate": 256,
-    "fec": False,
-    "bandwidth": "full",
-    "signal_type": "music",
-}
+def _encoder_opts(vc):
+    ch_kbps = getattr(getattr(vc, "channel", None), "bitrate", 96000) // 1000
+    return {
+        "application": "audio",
+        "bitrate": min(max(ch_kbps, 64), 128),
+        "fec": True,
+        "bandwidth": "full",
+        "signal_type": "music",
+    }
 
 
 async def _wait_dave_ready(vc, timeout=5.0):
@@ -142,7 +144,7 @@ def _play_next_in_queue(guild, text_channel=None):
         except Exception:
             pass
 
-    vc.play(source, after=_after, **_MUSIC_ENCODER_OPTS)
+    vc.play(source, after=_after, **_encoder_opts(vc))
 
 
 async def _on_track_end(guild, text_channel, err=None):
@@ -172,7 +174,7 @@ def _play_station(vc, idx):
     if vc.is_playing() or vc.is_paused():
         vc.stop()
     source = _make_audio_source(url)
-    vc.play(source, after=lambda err: log("lofi stream end:", err) if err else None, **_MUSIC_ENCODER_OPTS)
+    vc.play(source, after=lambda err: log("lofi stream end:", err) if err else None, **_encoder_opts(vc))
     return title
 
 

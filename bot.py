@@ -80,7 +80,11 @@ async def on_voice_state_update(member, before, after):
         ow = dict(cat.overwrites) if cat else {}
         ow[member] = discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True)
         room = await member.guild.create_voice_channel(
-            f"🔊 ╎ {member.display_name}", category=cat, overwrites=ow, reason="Join-to-Create Voice"
+            f"🔊 ╎ {member.display_name}",
+            category=cat,
+            overwrites=ow,
+            bitrate=int(min(member.guild.bitrate_limit, 96000)),
+            reason="Join-to-Create Voice",
         )
         TEMP_VOICE_IDS.add(room.id)
         TEMP_VOICE_OWNERS[room.id] = member.id
