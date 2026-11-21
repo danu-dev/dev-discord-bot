@@ -13,7 +13,7 @@ from bot_modules.economy_xp import (
 from bot_modules.community import (
     _help_embed, RolePickerView, SuggestionView, TicketLauncherView, TicketCloseView,
     TEMP_VOICE_HUB_ID, TEMP_VOICE_HUB_NAME, TEMP_VOICE_IDS, TEMP_VOICE_OWNERS,
-    _is_temp_voice, TempVoiceView, GiveawayView, SNIPE_CACHE,
+    _is_temp_voice, TempVoiceView, SNIPE_CACHE,
     _members_page, MembersView, _userinfo_embed, _do_timeout, _do_ban, _do_unban, _do_kick,
 )
 from bot_modules.music import (
@@ -205,7 +205,6 @@ async def on_ready():
     client.add_view(LofiView())
     client.add_view(NextMusicView())
     client.add_view(FounderManageView())
-    client.add_view(GiveawayView())
     client.add_view(TempVoiceView())
     client.add_view(ShopView())
     client.add_view(VerifyView())

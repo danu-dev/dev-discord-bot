@@ -39,7 +39,7 @@ def _help_embed(member):
         e.add_field(
             name="🛡️ Staff & Owner",
             value="`/mod ban` • `/mod unban` • `/mod kick` • `/mod timeout` • `/mod purge`\n"
-                  "`/rank setlevel` • `/ekonomi give` • `/giveaway` • `/panel-verify`\n"
+                  "`/rank setlevel` • `/ekonomi give` • `/panel-verify`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!panel-verify` • `!test-welcome` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
@@ -526,124 +526,6 @@ class TempVoiceView(discord.ui.View):
         v.add_item(TempVoiceKickSelect(kickable))
         await interaction.response.send_message("Pilih member di room ini yang mau dikeluarkan:", view=v, ephemeral=True)
 
-
-
-# --- Giveaway (/giveaway) -------------------------------------------------
-GIVEAWAYS = {}
-
-
-def _giveaway_embed(gw):
-    ended = gw.get("ended", False)
-    title = "🎉 ╎ GIVEAWAY SELESAI" if ended else "🎉 ╎ GIVEAWAY"
-    status_line = (
-        f"🏆 **Pemenang:** {gw.get('winners_text', '-')}"
-        if ended
-        else f"⏰ **Berakhir:** <t:{gw['end_ts']}:R>\n👥 **Peserta:** `{len(gw['participants'])}` orang"
-    )
-    e = discord.Embed(
-        title=title,
-        description=f"🎁 **Hadiah:** {gw['prize']}\n👑 **Pemenang:** `{gw['winners_count']}` orang\n{status_line}",
-        colour=GREEN if not ended else GOLD,
-    )
-    e.set_footer(text=f"Diselenggarakan oleh {gw['host_name']}")
-    return e
-
-
-async def _end_giveaway(guild, channel, msg_id):
-    gw = GIVEAWAYS.get(msg_id)
-    if not gw or gw.get("ended"):
-        return
-    gw["ended"] = True
-    pool = list(gw["participants"])
-    count = min(gw["winners_count"], len(pool))
-    winners = _rng.sample(pool, count) if count > 0 else []
-    gw["winners_text"] = ", ".join(f"<@{uid}>" for uid in winners) if winners else "_Tidak ada peserta_"
-    try:
-        msg = await channel.fetch_message(msg_id)
-        await msg.edit(embed=_giveaway_embed(gw), view=None)
-    except Exception:
-        pass
-    if winners:
-        await channel.send(f"🎊 Selamat {gw['winners_text']}! Kamu memenangkan **{gw['prize']}**!")
-    else:
-        await channel.send(f"😢 Giveaway **{gw['prize']}** berakhir tanpa peserta.")
-
-
-async def _finish_giveaway_after(guild, channel, msg_id, delay):
-    await asyncio.sleep(max(1, delay))
-    await _end_giveaway(guild, channel, msg_id)
-
-
-class GiveawayView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="Ikut Giveaway", emoji="🎉", style=discord.ButtonStyle.success, custom_id="gw_join")
-    async def join_btn(self, interaction: discord.Interaction, _b):
-        gw = GIVEAWAYS.get(interaction.message.id)
-        if not gw or gw.get("ended"):
-            await interaction.response.send_message("❌ Giveaway ini sudah berakhir atau data restart.", ephemeral=True)
-            return
-        uid = interaction.user.id
-        if uid in gw["participants"]:
-            gw["participants"].remove(uid)
-            msg_txt = "ℹ️ Kamu keluar dari giveaway ini."
-        else:
-            gw["participants"].add(uid)
-            msg_txt = f"✅ Kamu berhasil ikut giveaway **{gw['prize']}**! Total peserta: `{len(gw['participants'])}`."
-        try:
-            await interaction.message.edit(embed=_giveaway_embed(gw), view=self)
-        except Exception:
-            pass
-        await interaction.response.send_message(msg_txt, ephemeral=True)
-
-    @discord.ui.button(label="Akhiri Sekarang", emoji="🏁", style=discord.ButtonStyle.secondary, custom_id="gw_end")
-    async def end_btn(self, interaction: discord.Interaction, _b):
-        gw = GIVEAWAYS.get(interaction.message.id)
-        if not gw or gw.get("ended"):
-            await interaction.response.send_message("❌ Giveaway sudah berakhir.", ephemeral=True)
-            return
-        if interaction.user.id != gw["host_id"] and not _has_mod_perm(interaction.user, "manage_guild"):
-            await interaction.response.send_message("❌ Hanya host/staff yang bisa mengakhiri giveaway.", ephemeral=True)
-            return
-        await interaction.response.send_message("🏁 Mengakhiri giveaway & mengundi pemenang...", ephemeral=True)
-        await _end_giveaway(interaction.guild, interaction.channel, interaction.message.id)
-
-
-@tree.command(name="giveaway", description="Buat giveaway dengan tombol ikut & undian otomatis", guild=discord.Object(id=GUILD_ID))
-@discord.app_commands.describe(
-    hadiah="Nama hadiah giveaway",
-    durasi_menit="Durasi giveaway dalam menit (1 - 10080)",
-    pemenang="Jumlah pemenang (default: 1)",
-    channel="Channel tujuan (opsional, default channel ini)",
-)
-async def slash_giveaway(
-    interaction: discord.Interaction,
-    hadiah: str,
-    durasi_menit: int,
-    pemenang: int = 1,
-    channel: discord.TextChannel = None,
-):
-    if not _has_mod_perm(interaction.user, "manage_guild"):
-        await interaction.response.send_message("❌ Kamu tidak punya izin membuat giveaway.", ephemeral=True)
-        return
-    dur = max(1, min(10080, durasi_menit))
-    win_cnt = max(1, min(20, pemenang))
-    ch = channel or interaction.channel
-    end_ts = int(time.time()) + dur * 60
-    gw = {
-        "prize": hadiah[:200],
-        "winners_count": win_cnt,
-        "end_ts": end_ts,
-        "host_id": interaction.user.id,
-        "host_name": interaction.user.display_name,
-        "participants": set(),
-        "ended": False,
-    }
-    msg = await ch.send(embed=_giveaway_embed(gw), view=GiveawayView())
-    GIVEAWAYS[msg.id] = gw
-    client.loop.create_task(_finish_giveaway_after(interaction.guild, ch, msg.id, dur * 60))
-    await interaction.response.send_message(f"🎉 Giveaway **{hadiah}** dibuat di {ch.mention} (berakhir <t:{end_ts}:R>).", ephemeral=True)
 
 
 SNIPE_CACHE = {}
