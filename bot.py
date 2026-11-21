@@ -1927,6 +1927,294 @@ def start_health_server():
     threading.Thread(target=http.server.HTTPServer(("0.0.0.0", port), Handler).serve_forever, daemon=True).start()
 
 
+# --- Founder-Only Channel & Category Management Panel ---------------------
+FOUNDER_CATEGORY_NAME = "👑 FOUNDER"
+FOUNDER_CHANNEL_NAME = "👑╎founder-panel"
+FOUNDER_PANEL_TITLE = "👑 ╎ Panel Manajemen Channel & Kategori"
+
+
+def _is_founder(member):
+    return member.id == OWNER_ID or any(r.id == FOUNDER_ROLE_ID for r in getattr(member, "roles", []))
+
+
+def _founder_overwrites(guild):
+    ow = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+    }
+    founder_role = guild.get_role(FOUNDER_ROLE_ID)
+    if founder_role:
+        ow[founder_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    return ow
+
+
+class FounderCreateCategoryModal(discord.ui.Modal, title="Buat Kategori Baru"):
+    nama = discord.ui.TextInput(label="Nama Kategori", placeholder="Contoh: 🎮 GAME", max_length=100, required=True)
+    privat = discord.ui.TextInput(
+        label="Privat? (ya / tidak)",
+        default="tidak",
+        max_length=10,
+        required=False,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        is_priv = (self.privat.value or "").strip().lower() in ("ya", "y", "yes", "true", "1")
+        ow = _founder_overwrites(interaction.guild) if is_priv else discord.utils.MISSING
+        cat = await interaction.guild.create_category(
+            self.nama.value.strip()[:100], overwrites=ow, reason=f"Founder Panel oleh {interaction.user}"
+        )
+        await interaction.response.send_message(
+            f"✅ Kategori **{cat.name}** berhasil dibuat" + (" (privat)." if is_priv else "."), ephemeral=True
+        )
+
+
+class FounderCreateChannelModal(discord.ui.Modal, title="Buat Channel Baru"):
+    nama = discord.ui.TextInput(label="Nama Channel", placeholder="Contoh: 💬╎diskusi", max_length=100, required=True)
+    tipe = discord.ui.TextInput(label="Tipe (teks / voice)", default="teks", max_length=10, required=True)
+    kategori = discord.ui.TextInput(label="Nama Kategori (opsional)", required=False, max_length=100)
+    kunci = discord.ui.TextInput(label="Kunci / Read-Only? (ya / tidak)", default="tidak", max_length=10, required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        guild = interaction.guild
+        cat = find_category(guild, self.kategori.value) if self.kategori.value.strip() else None
+        is_locked = (self.kunci.value or "").strip().lower() in ("ya", "y", "yes", "true", "1")
+        is_voice = (self.tipe.value or "").strip().lower() in ("voice", "vc", "v")
+        if is_voice:
+            ow = {guild.default_role: discord.PermissionOverwrite(connect=False)} if is_locked else discord.utils.MISSING
+            ch = await guild.create_voice_channel(
+                self.nama.value.strip()[:100], category=cat, overwrites=ow, reason=f"Founder Panel oleh {interaction.user}"
+            )
+        else:
+            ow = {
+                guild.default_role: discord.PermissionOverwrite(send_messages=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+            } if is_locked else discord.utils.MISSING
+            ch = await guild.create_text_channel(
+                self.nama.value.strip()[:100], category=cat, overwrites=ow, reason=f"Founder Panel oleh {interaction.user}"
+            )
+        cat_txt = f" di **{cat.name}**" if cat else ""
+        await interaction.response.send_message(f"✅ Channel {ch.mention} berhasil dibuat{cat_txt}.", ephemeral=True)
+
+
+class FounderRenameModal(discord.ui.Modal, title="Ganti Nama Channel / Kategori"):
+    nama_baru = discord.ui.TextInput(label="Nama Baru", max_length=100, required=True)
+
+    def __init__(self, target_channel):
+        super().__init__()
+        self.target_channel = target_channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        old_name = self.target_channel.name
+        new_name = self.nama_baru.value.strip()[:100]
+        await self.target_channel.edit(name=new_name, reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.send_message(f"✅ **{old_name}** berhasil diganti menjadi **{new_name}**.", ephemeral=True)
+
+
+class FounderMoveCategorySelect(discord.ui.ChannelSelect):
+    def __init__(self, target_channel):
+        self.target_channel = target_channel
+        super().__init__(
+            placeholder="📦 Pilih kategori tujuan...",
+            channel_types=[discord.ChannelType.category],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cat = interaction.guild.get_channel(self.values[0].id)
+        if not isinstance(cat, discord.CategoryChannel):
+            await interaction.response.send_message("❌ Kategori tidak valid.", ephemeral=True)
+            return
+        await self.target_channel.edit(category=cat, reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.send_message(
+            f"✅ **{self.target_channel.name}** dipindahkan ke kategori **{cat.name}**.", ephemeral=True
+        )
+
+
+class FounderPermActionView(discord.ui.View):
+    def __init__(self, target_channel):
+        super().__init__(timeout=180)
+        self.target_channel = target_channel
+        if not isinstance(target_channel, discord.CategoryChannel):
+            self.add_item(FounderMoveCategorySelect(target_channel))
+
+    @discord.ui.button(label="Lock (Read-Only)", emoji="🔒", style=discord.ButtonStyle.secondary)
+    async def lock_btn(self, interaction: discord.Interaction, _b):
+        await self.target_channel.set_permissions(
+            interaction.guild.default_role, send_messages=False, reason=f"Founder Panel oleh {interaction.user}"
+        )
+        await interaction.response.send_message(f"🔒 **{self.target_channel.name}** dikunci (read-only).", ephemeral=True)
+
+    @discord.ui.button(label="Unlock", emoji="🔓", style=discord.ButtonStyle.success)
+    async def unlock_btn(self, interaction: discord.Interaction, _b):
+        await self.target_channel.set_permissions(
+            interaction.guild.default_role, send_messages=None, reason=f"Founder Panel oleh {interaction.user}"
+        )
+        await interaction.response.send_message(f"🔓 **{self.target_channel.name}** dibuka kembali.", ephemeral=True)
+
+    @discord.ui.button(label="Private (Founder)", emoji="🙈", style=discord.ButtonStyle.primary)
+    async def private_btn(self, interaction: discord.Interaction, _b):
+        await self.target_channel.set_permissions(
+            interaction.guild.default_role, view_channel=False, reason=f"Founder Panel oleh {interaction.user}"
+        )
+        founder_role = interaction.guild.get_role(FOUNDER_ROLE_ID)
+        if founder_role:
+            await self.target_channel.set_permissions(
+                founder_role, view_channel=True, send_messages=True, reason=f"Founder Panel oleh {interaction.user}"
+            )
+        await interaction.response.send_message(f"🙈 **{self.target_channel.name}** diubah menjadi privat (khusus Founder).", ephemeral=True)
+
+    @discord.ui.button(label="Public", emoji="👁️", style=discord.ButtonStyle.secondary)
+    async def public_btn(self, interaction: discord.Interaction, _b):
+        await self.target_channel.set_permissions(
+            interaction.guild.default_role, view_channel=None, reason=f"Founder Panel oleh {interaction.user}"
+        )
+        await interaction.response.send_message(f"👁️ **{self.target_channel.name}** dibuka untuk publik.", ephemeral=True)
+
+
+class FounderDeleteConfirmView(discord.ui.View):
+    def __init__(self, target_channel):
+        super().__init__(timeout=60)
+        self.target_channel = target_channel
+
+    @discord.ui.button(label="Ya, Hapus Permanen", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def confirm_btn(self, interaction: discord.Interaction, _b):
+        name = self.target_channel.name
+        await self.target_channel.delete(reason=f"Founder Panel oleh {interaction.user}")
+        await interaction.response.edit_message(content=f"🗑️ **{name}** berhasil dihapus.", view=None)
+
+    @discord.ui.button(label="Batal", style=discord.ButtonStyle.secondary)
+    async def cancel_btn(self, interaction: discord.Interaction, _b):
+        await interaction.response.edit_message(content="❎ Penghapusan dibatalkan.", view=None)
+
+
+class FounderTargetSelect(discord.ui.ChannelSelect):
+    def __init__(self, action):
+        self.action = action
+        labels = {"rename": "ganti nama", "perm": "atur permission", "delete": "hapus"}
+        super().__init__(
+            placeholder=f"Pilih channel atau kategori yang mau di-{labels[action]}...",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.voice, discord.ChannelType.category],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        ch = interaction.guild.get_channel(self.values[0].id)
+        if not ch:
+            await interaction.response.send_message("❌ Channel/kategori tidak ditemukan.", ephemeral=True)
+            return
+        if self.action == "rename":
+            await interaction.response.send_modal(FounderRenameModal(ch))
+        elif self.action == "perm":
+            await interaction.response.send_message(
+                f"⚙️ Atur permission untuk **{ch.name}**:", view=FounderPermActionView(ch), ephemeral=True
+            )
+        elif self.action == "delete":
+            await interaction.response.send_message(
+                f"⚠️ Yakin ingin menghapus **{ch.name}** secara permanen?",
+                view=FounderDeleteConfirmView(ch),
+                ephemeral=True,
+            )
+
+
+class FounderManageView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Buat Kategori", emoji="📁", style=discord.ButtonStyle.primary, custom_id="fnd_mk_cat")
+    async def mk_cat(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FounderCreateCategoryModal())
+
+    @discord.ui.button(label="Buat Channel", emoji="💬", style=discord.ButtonStyle.success, custom_id="fnd_mk_ch")
+    async def mk_ch(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        await interaction.response.send_modal(FounderCreateChannelModal())
+
+    @discord.ui.button(label="Ganti Nama", emoji="✏️", style=discord.ButtonStyle.secondary, custom_id="fnd_rename")
+    async def rename_ch(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderTargetSelect("rename"))
+        await interaction.response.send_message("Pilih channel/kategori yang mau diganti namanya:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Ubah Permission", emoji="🔒", style=discord.ButtonStyle.secondary, custom_id="fnd_perm")
+    async def perm_ch(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderTargetSelect("perm"))
+        await interaction.response.send_message("Pilih channel/kategori yang mau diatur permission-nya:", view=v, ephemeral=True)
+
+    @discord.ui.button(label="Hapus", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="fnd_delete")
+    async def del_ch(self, interaction: discord.Interaction, _b):
+        if not _is_founder(interaction.user):
+            await interaction.response.send_message("❌ Khusus Founder.", ephemeral=True)
+            return
+        v = discord.ui.View(timeout=120)
+        v.add_item(FounderTargetSelect("delete"))
+        await interaction.response.send_message("Pilih channel/kategori yang mau dihapus:", view=v, ephemeral=True)
+
+
+async def _ensure_founder_panel():
+    guild = client.get_guild(GUILD_ID)
+    if not guild:
+        return
+    try:
+        cat = find_category(guild, FOUNDER_CATEGORY_NAME)
+        if not cat:
+            cat = await guild.create_category(
+                FOUNDER_CATEGORY_NAME,
+                overwrites=_founder_overwrites(guild),
+                reason="Setup kategori khusus Founder",
+            )
+        ch = discord.utils.find(lambda c: c.name == FOUNDER_CHANNEL_NAME, cat.text_channels)
+        if not ch:
+            ch = await guild.create_text_channel(
+                FOUNDER_CHANNEL_NAME,
+                category=cat,
+                overwrites=_founder_overwrites(guild),
+                topic="Panel manajemen channel & kategori khusus Founder",
+                reason="Setup channel khusus Founder",
+            )
+        has_panel = False
+        async for m in ch.history(limit=10):
+            if m.author == client.user and m.embeds and m.embeds[0].title == FOUNDER_PANEL_TITLE:
+                has_panel = True
+                break
+        if not has_panel:
+            e = discord.Embed(
+                title=FOUNDER_PANEL_TITLE,
+                description=(
+                    "Gunakan tombol di bawah untuk mengelola server secara langsung:\n"
+                    "• **📁 Buat Kategori** — Tambah kategori baru (publik/privat)\n"
+                    "• **💬 Buat Channel** — Tambah channel teks/voice baru\n"
+                    "• **✏️ Ganti Nama** — Ubah nama channel atau kategori\n"
+                    "• **🔒 Ubah Permission** — Lock, Unlock, Private, Public, atau Pindah Kategori\n"
+                    "• **🗑️ Hapus** — Hapus channel atau kategori (dengan konfirmasi)"
+                ),
+                colour=GOLD,
+            )
+            e.set_footer(text="Akses terbatas: khusus Owner & Role Founder")
+            await ch.send(embed=e, view=FounderManageView())
+    except Exception as exc:
+        log("ensure founder panel error:", exc)
+
+
 @client.event
 async def on_ready():
     client.add_view(RolePickerView())
@@ -1935,12 +2223,14 @@ async def on_ready():
     client.add_view(TicketCloseView())
     client.add_view(LofiView())
     client.add_view(NextMusicView())
+    client.add_view(FounderManageView())
     if not getattr(client, "_bg_started", False):
         client._bg_started = True
         try:
             await tree.sync(guild=discord.Object(id=GUILD_ID))
         except Exception as exc:
             log("tree sync error:", exc)
+        await _ensure_founder_panel()
         client.loop.create_task(background_qa_and_autorole())
     log(f"online sebagai {client.user} — melayani owner {OWNER_ID} di #commands")
 
