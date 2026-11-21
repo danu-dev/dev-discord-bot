@@ -1352,26 +1352,53 @@ async def on_message_edit(before, after):
     )
 
 
+TEMP_VOICE_HUB_ID = 1573525468920160337
+PERMANENT_VOICE_IDS = {
+    1573525457016721492,  # 🎧 ╎ Lounge
+    1573525468920160337,  # ➕ ╎ Buat Room
+    1573529663622484068,  # 🎮 ╎ Mabar
+    1573529666231345192,  # 💤 ╎ AFK
+}
+
+
+def _is_temp_voice(ch):
+    return ch.id in TEMP_VOICE_IDS or (ch.name.startswith("🔊 ╎ ") and ch.id not in PERMANENT_VOICE_IDS)
+
+
 @client.event
 async def on_voice_state_update(member, before, after):
     if member.guild.id != GUILD_ID:
         return
-    if after.channel and after.channel.name == TEMP_VOICE_HUB_NAME:
+    if after.channel and before.channel != after.channel and (
+        after.channel.id == TEMP_VOICE_HUB_ID or after.channel.name == TEMP_VOICE_HUB_NAME
+    ):
         cat = after.channel.category
         room = await member.guild.create_voice_channel(
             f"🔊 ╎ {member.display_name}", category=cat, reason="Join-to-Create Voice"
         )
         TEMP_VOICE_IDS.add(room.id)
-        try:
-            await member.move_to(room)
-        except Exception:
-            pass
-    if before.channel and before.channel.id in TEMP_VOICE_IDS and len(before.channel.members) == 0:
+        await asyncio.sleep(0.25)
+        moved = False
+        for attempt in range(2):
+            try:
+                await member.move_to(room)
+                moved = True
+                break
+            except Exception as exc:
+                log(f"temp voice move attempt {attempt + 1} failed:", exc)
+                await asyncio.sleep(0.5)
+        if not moved and len(room.members) == 0:
+            TEMP_VOICE_IDS.discard(room.id)
+            try:
+                await room.delete(reason="Gagal memindahkan member ke temp voice")
+            except Exception as exc:
+                log("temp voice cleanup failed:", exc)
+    if before.channel and before.channel != after.channel and _is_temp_voice(before.channel) and len(before.channel.members) == 0:
         TEMP_VOICE_IDS.discard(before.channel.id)
         try:
             await before.channel.delete(reason="Temp voice kosong")
-        except Exception:
-            pass
+        except Exception as exc:
+            log("temp voice delete failed:", exc)
     vc = member.guild.voice_client
     if vc and vc.is_connected() and vc.channel:
         humans = [m for m in vc.channel.members if not m.bot]
