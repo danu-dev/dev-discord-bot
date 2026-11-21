@@ -10,22 +10,27 @@ def _help_embed(member):
     )
     e.add_field(
         name="🏅 Rank & Level ML",
-        value="`/rank` • `/ranks` • `/leaderboard` • `/daily`",
+        value="`/rank cek` • `/rank daftar` • `/rank leaderboard`",
         inline=False,
     )
     e.add_field(
-        name="🎮 Mini-Games & Kasino (XP & Koin)",
-        value="`/kerja` • `/suit` • `/coinflip` • `/tebakangka` • `/blackjack` • `/roulette`",
+        name="🪙 Ekonomi & Shop",
+        value="`/ekonomi koin` • `/ekonomi shop` • `/ekonomi kerja` • `/ekonomi daily` • `/ekonomi bulanan`",
+        inline=False,
+    )
+    e.add_field(
+        name="🎮 Mini-Games & Kasino",
+        value="`/game blackjack` • `/game roulette` • `/game suit` • `/game coinflip` • `/game tebakangka`",
         inline=False,
     )
     e.add_field(
         name="🛠️ Komunitas & Info",
-        value="`/help` • `/koin` • `/shop` • `/klaim-bulanan` • `/invites` • `/snipe` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        value="`/help` • `/invites` • `/snipe` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
         inline=False,
     )
     e.add_field(
         name="🎵 Musik & Lofi",
-        value="`/play <judul>` • `/lofi [stasiun]` • `/skip` • `/queue` • `/stop`",
+        value="`/musik play` • `/musik lofi` • `/musik skip` • `/musik queue` • `/musik stop`",
         inline=False,
     )
     perms = member.guild_permissions
@@ -33,7 +38,8 @@ def _help_embed(member):
     if member.id == OWNER_ID or has_mod_role or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
         e.add_field(
             name="🛡️ Staff & Owner",
-            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel` • `/giveaway` • `/panel-verify`\n"
+            value="`/mod ban` • `/mod unban` • `/mod kick` • `/mod timeout` • `/mod purge`\n"
+                  "`/rank setlevel` • `/ekonomi give` • `/giveaway` • `/panel-verify`\n"
                   "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!panel-verify` • `!test-welcome` • `!reset` • Mention bot untuk AI",
             inline=False,
         )
@@ -231,7 +237,10 @@ async def _do_kick(guild, actor, member, reason):
     return f"👢 {member.mention} berhasil di-kick. Alasan: **{reason}**"
 
 
-@tree.command(name="ban", description="Ban user dari server", guild=discord.Object(id=GUILD_ID))
+mod_group = discord.app_commands.Group(name="mod", description="Moderasi server (khusus Staff)")
+
+
+@mod_group.command(name="ban", description="Ban user dari server")
 @discord.app_commands.describe(user="Member yang mau di-ban", alasan="Alasan ban (opsional)")
 async def slash_ban(interaction: discord.Interaction, user: discord.User, alasan: str = "Tidak ada alasan"):
     if not _has_mod_perm(interaction.user, "ban_members"):
@@ -240,7 +249,7 @@ async def slash_ban(interaction: discord.Interaction, user: discord.User, alasan
     await interaction.response.send_message(await _do_ban(interaction.guild, interaction.user, user.id, alasan))
 
 
-@tree.command(name="unban", description="Unban user berdasarkan User ID", guild=discord.Object(id=GUILD_ID))
+@mod_group.command(name="unban", description="Unban user berdasarkan User ID")
 @discord.app_commands.describe(user_id="ID user yang mau di-unban", alasan="Alasan unban (opsional)")
 async def slash_unban(interaction: discord.Interaction, user_id: str, alasan: str = "Tidak ada alasan"):
     if not _has_mod_perm(interaction.user, "ban_members"):
@@ -253,7 +262,7 @@ async def slash_unban(interaction: discord.Interaction, user_id: str, alasan: st
     await interaction.response.send_message(await _do_unban(interaction.guild, interaction.user, tid, alasan))
 
 
-@tree.command(name="kick", description="Kick member dari server", guild=discord.Object(id=GUILD_ID))
+@mod_group.command(name="kick", description="Kick member dari server")
 @discord.app_commands.describe(member="Member yang mau di-kick", alasan="Alasan kick (opsional)")
 async def slash_kick(interaction: discord.Interaction, member: discord.Member, alasan: str = "Tidak ada alasan"):
     if not _has_mod_perm(interaction.user, "kick_members"):
@@ -336,7 +345,7 @@ def _userinfo_embed(member):
     return e
 
 
-@tree.command(name="timeout", description="Mute sementara (timeout) member", guild=discord.Object(id=GUILD_ID))
+@mod_group.command(name="timeout", description="Mute sementara (timeout) member")
 @discord.app_commands.describe(member="Member yang mau di-timeout", menit="Durasi dalam menit (1-40320)", alasan="Alasan timeout")
 async def slash_timeout(interaction: discord.Interaction, member: discord.Member, menit: int = 10, alasan: str = "Tidak ada alasan"):
     if not _has_mod_perm(interaction.user, "moderate_members"):
@@ -345,7 +354,7 @@ async def slash_timeout(interaction: discord.Interaction, member: discord.Member
     await interaction.response.send_message(await _do_timeout(interaction.guild, interaction.user, member, menit, alasan))
 
 
-@tree.command(name="purge", description="Hapus banyak pesan sekaligus di channel ini", guild=discord.Object(id=GUILD_ID))
+@mod_group.command(name="purge", description="Hapus banyak pesan sekaligus di channel ini")
 @discord.app_commands.describe(jumlah="Jumlah pesan yang mau dihapus (1-100)")
 async def slash_purge(interaction: discord.Interaction, jumlah: int):
     if not _has_mod_perm(interaction.user, "manage_messages"):
@@ -657,5 +666,8 @@ async def slash_snipe(interaction: discord.Interaction, sembunyikan: bool = Fals
     e.set_footer(text=f"Dihapus • #{interaction.channel.name}")
     e.timestamp = data["deleted_at"]
     await interaction.response.send_message(embed=e, ephemeral=sembunyikan)
+
+
+tree.add_command(mod_group, guild=discord.Object(id=GUILD_ID))
 
 

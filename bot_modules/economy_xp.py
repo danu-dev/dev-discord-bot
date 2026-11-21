@@ -98,12 +98,17 @@ def _leaderboard_embed(guild):
     )
 
 
-@tree.command(name="rank", description="Cek level & XP kamu", guild=discord.Object(id=GUILD_ID))
+rank_group = discord.app_commands.Group(name="rank", description="Level, rank ML, dan leaderboard")
+game_group = discord.app_commands.Group(name="game", description="Mini-games dan kasino")
+ekonomi_group = discord.app_commands.Group(name="ekonomi", description="Koin, kerja, dan toko role")
+
+
+@rank_group.command(name="cek", description="Cek level & XP kamu")
 async def slash_rank(interaction: discord.Interaction, member: discord.Member = None):
     await interaction.response.send_message(embed=_rank_embed(member or interaction.user))
 
 
-@tree.command(name="leaderboard", description="Lihat top 10 member paling aktif", guild=discord.Object(id=GUILD_ID))
+@rank_group.command(name="leaderboard", description="Lihat top 10 member paling aktif")
 async def slash_leaderboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_leaderboard_embed(interaction.guild))
 
@@ -130,7 +135,7 @@ async def slash_help(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_help_embed(interaction.user), ephemeral=True)
 
 
-@tree.command(name="ranks", description="Lihat daftar semua tier Rank ML berdasarkan level", guild=discord.Object(id=GUILD_ID))
+@rank_group.command(name="daftar", description="Lihat daftar semua tier Rank ML berdasarkan level")
 async def slash_ranks(interaction: discord.Interaction):
     lines = [f"• **Level {req}** → **{name}**" for req, name, _ in ML_RANK_TIERS]
     lines.append("• **Level 30+** → **⚡ ╎ Mythical Immortal ★1, ★2, ★3, ...** *(terus naik setiap level!)*")
@@ -139,7 +144,7 @@ async def slash_ranks(interaction: discord.Interaction):
     await interaction.response.send_message(embed=e)
 
 
-@tree.command(name="setlevel", description="Atur level member & sync rank ML (khusus Owner)", guild=discord.Object(id=GUILD_ID))
+@rank_group.command(name="setlevel", description="Atur level member & sync rank ML (khusus Owner)")
 @discord.app_commands.describe(member="Member target", level="Level target (0-200)")
 async def slash_setlevel(interaction: discord.Interaction, member: discord.Member, level: int):
     if interaction.user.id != OWNER_ID:
@@ -181,7 +186,7 @@ async def _grant_bonus_xp(guild, member, amount):
     return ""
 
 
-@tree.command(name="suit", description="Main Batu Gunting Kertas lawan bot", guild=discord.Object(id=GUILD_ID))
+@game_group.command(name="suit", description="Main Batu Gunting Kertas lawan bot")
 @discord.app_commands.choices(pilihan=[
     discord.app_commands.Choice(name="🪨 Batu", value="batu"),
     discord.app_commands.Choice(name="✂️ Gunting", value="gunting"),
@@ -207,7 +212,7 @@ async def slash_suit(interaction: discord.Interaction, pilihan: discord.app_comm
     await interaction.response.send_message(f"Kamu: {icons[user_val]} vs Bot: {icons[bot_pick]}\n{res}")
 
 
-@tree.command(name="coinflip", description="Lempar koin (Kepala / Ekor)", guild=discord.Object(id=GUILD_ID))
+@game_group.command(name="coinflip", description="Lempar koin (Kepala / Ekor)")
 @discord.app_commands.choices(tebak=[
     discord.app_commands.Choice(name="🪙 Kepala", value="kepala"),
     discord.app_commands.Choice(name="🦅 Ekor", value="ekor"),
@@ -248,7 +253,7 @@ def _save_daily():
         pass
 
 
-@tree.command(name="daily", description="Klaim bonus XP harian (ada bonus streak!)", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="daily", description="Klaim bonus XP & koin harian")
 async def slash_daily(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     now = time.time()
@@ -286,7 +291,7 @@ async def slash_confess(interaction: discord.Interaction, pesan: str):
     await interaction.followup.send(f"✅ Confess kamu sudah dikirim secara anonim ke {ch.mention}!", ephemeral=True)
 
 
-@tree.command(name="tebakangka", description="Tebak angka 1 sampai 10", guild=discord.Object(id=GUILD_ID))
+@game_group.command(name="tebakangka", description="Tebak angka 1 sampai 10")
 @discord.app_commands.describe(angka="Pilih angka 1 - 10")
 async def slash_tebakangka(interaction: discord.Interaction, angka: int):
     if not 1 <= angka <= 10:
@@ -434,7 +439,7 @@ class ShopView(discord.ui.View):
         self.add_item(ShopRoleSelect(SHOP_SPECIAL_ROLES, "👑 Pilih Special Collection...", "shop_special_select"))
 
 
-@tree.command(name="koin", description="Cek saldo koin & XP kamu atau member lain", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="koin", description="Cek saldo koin & XP kamu atau member lain")
 async def slash_koin(interaction: discord.Interaction, member: discord.Member = None):
     m = member or interaction.user
     coins = _get_coins(m.id)
@@ -449,7 +454,7 @@ async def slash_koin(interaction: discord.Interaction, member: discord.Member = 
     await interaction.response.send_message(embed=e)
 
 
-@tree.command(name="shop", description="Buka toko role menggunakan koin", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="shop", description="Buka toko role menggunakan koin")
 async def slash_shop(interaction: discord.Interaction):
     bal = _get_coins(interaction.user.id)
     fmt = lambda items: "\n".join(f"• **{name}** — `{price} Koin` ({desc})" for _k, name, _c, price, desc in items)
@@ -464,7 +469,7 @@ async def slash_shop(interaction: discord.Interaction):
     await interaction.response.send_message(embed=e, view=ShopView(), ephemeral=True)
 
 
-@tree.command(name="klaim-bulanan", description="Klaim bonus koin bulanan untuk pemilik Role Shop", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="bulanan", description="Klaim bonus koin bulanan untuk pemilik Role Shop")
 async def slash_monthly(interaction: discord.Interaction):
     member_role_names = {r.name for r in interaction.user.roles}
     best_name, best_bonus = None, 0
@@ -489,7 +494,7 @@ async def slash_monthly(interaction: discord.Interaction):
     )
 
 
-@tree.command(name="givekoin", description="Tambah koin ke member (khusus Owner)", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="give", description="Tambah koin ke member (khusus Owner)")
 @discord.app_commands.describe(member="Member target", jumlah="Jumlah koin yang ditambahkan")
 async def slash_givekoin(interaction: discord.Interaction, member: discord.Member, jumlah: int):
     if interaction.user.id != OWNER_ID:
@@ -616,7 +621,7 @@ class BlackjackView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
 
-@tree.command(name="blackjack", description="Main Blackjack pakai koin", guild=discord.Object(id=GUILD_ID))
+@game_group.command(name="blackjack", description="Main Blackjack pakai koin")
 @discord.app_commands.describe(taruhan="Jumlah taruhan (10 - 5000 koin)")
 async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
     if not 10 <= taruhan <= 5000:
@@ -655,7 +660,7 @@ async def slash_blackjack(interaction: discord.Interaction, taruhan: int):
     await interaction.response.send_message(embed=view._embed("Pilih **Hit**, **Stand**, atau **Double Down**:"), view=view)
 
 
-@tree.command(name="roulette", description="Main Roulette pakai koin", guild=discord.Object(id=GUILD_ID))
+@game_group.command(name="roulette", description="Main Roulette pakai koin")
 @discord.app_commands.describe(
     taruhan="Jumlah taruhan (10 - 5000 koin)",
     pilihan="Pilih warna, genap/ganjil, atau besar/kecil",
@@ -760,7 +765,7 @@ _WORK_JACKPOTS = [
 ]
 
 
-@tree.command(name="kerja", description="Cari koin lewat kerja sampingan", guild=discord.Object(id=GUILD_ID))
+@ekonomi_group.command(name="kerja", description="Cari koin lewat kerja sampingan")
 async def slash_kerja(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     work_cd_map = ECONOMY_DATA.setdefault("work_cd", {})
@@ -850,5 +855,9 @@ async def _update_server_counters(guild):
                 await ch.edit(name=desired_name, reason="Update Live Server Counter")
         except Exception as exc:
             log("counter update error:", exc)
+
+
+for _grp in (rank_group, game_group, ekonomi_group):
+    tree.add_command(_grp, guild=discord.Object(id=GUILD_ID))
 
 

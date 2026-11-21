@@ -401,7 +401,10 @@ async def _ensure_voice(guild, member, channel, reply_fn):
     return vc
 
 
-@tree.command(name="play", description="Putar lagu dari judul atau URL di voice channel", guild=discord.Object(id=GUILD_ID))
+musik_group = discord.app_commands.Group(name="musik", description="Putar lagu, radio lofi, dan kontrol antrian")
+
+
+@musik_group.command(name="play", description="Putar lagu dari judul atau URL di voice channel")
 @discord.app_commands.describe(judul="Judul lagu atau link yang mau diputar")
 async def slash_play(interaction: discord.Interaction, judul: str):
     await interaction.response.defer()
@@ -423,7 +426,7 @@ async def slash_play(interaction: discord.Interaction, judul: str):
         await interaction.followup.send(f"❌ Gagal memutar audio: `{str(exc)[:180]}`")
 
 
-@tree.command(name="lofi", description="Putar radio lofi 24/7 di voice channel", guild=discord.Object(id=GUILD_ID))
+@musik_group.command(name="lofi", description="Putar radio lofi 24/7 di voice channel")
 @discord.app_commands.describe(stasiun="Pilih stasiun lofi (opsional)")
 @discord.app_commands.choices(stasiun=[
     discord.app_commands.Choice(name="☕ Lofi Beats Radio", value="lofi"),
@@ -458,7 +461,7 @@ async def slash_lofi(interaction: discord.Interaction, stasiun: str = "lofi"):
         await interaction.followup.send(f"❌ Gagal memutar lofi: `{str(exc)[:180]}`")
 
 
-@tree.command(name="skip", description="Skip lagu saat ini atau ganti stasiun lofi", guild=discord.Object(id=GUILD_ID))
+@musik_group.command(name="skip", description="Skip lagu saat ini atau ganti stasiun lofi")
 async def slash_skip(interaction: discord.Interaction):
     vc = interaction.guild.voice_client
     if not vc or not vc.is_connected():
@@ -472,7 +475,7 @@ async def slash_skip(interaction: discord.Interaction):
         await interaction.response.send_message(embed=_lofi_embed(title, vc.channel.name), view=LofiView())
 
 
-@tree.command(name="queue", description="Lihat daftar antrian lagu saat ini", guild=discord.Object(id=GUILD_ID))
+@musik_group.command(name="queue", description="Lihat daftar antrian lagu saat ini")
 async def slash_queue(interaction: discord.Interaction):
     cur = NOW_PLAYING.get("track")
     lines = [f"**Sedang diputar:** {cur['title']}" if cur else "**Sedang diputar:** tidak ada"]
@@ -481,7 +484,7 @@ async def slash_queue(interaction: discord.Interaction):
     await interaction.response.send_message(embed=discord.Embed(title="🎶 Antrian Lagu", description="\n".join(lines), colour=0x9B59B6))
 
 
-@tree.command(name="stop", description="Matikan musik dan keluarkan bot dari voice channel", guild=discord.Object(id=GUILD_ID))
+@musik_group.command(name="stop", description="Matikan musik dan keluarkan bot dari voice channel")
 async def slash_stop(interaction: discord.Interaction):
     MUSIC_QUEUE.clear()
     NOW_PLAYING["track"] = None
@@ -492,5 +495,8 @@ async def slash_stop(interaction: discord.Interaction):
     vc.stop()
     await vc.disconnect()
     await interaction.response.send_message("⏹️ Musik dimatikan & keluar dari voice.")
+
+
+tree.add_command(musik_group, guild=discord.Object(id=GUILD_ID))
 
 
