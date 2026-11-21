@@ -89,13 +89,9 @@ def _make_audio_source(url, headers=None):
         if hdr:
             before.append(f'-headers "{hdr}"')
     before_str = " ".join(before) or None
-    return discord.FFmpegOpusAudio(
-        url,
-        bitrate=192,
-        codec="libopus",
-        before_options=before_str,
-        options="-vn -ar 48000 -ac 2 -application audio",
-    )
+    if discord.opus.is_loaded():
+        return discord.FFmpegPCMAudio(url, before_options=before_str, options="-vn -ar 48000 -ac 2")
+    return discord.FFmpegOpusAudio(url, before_options=before_str, options="-vn")
 
 
 async def _wait_dave_ready(vc, timeout=5.0):
