@@ -14,6 +14,7 @@ available at all.
 
 import asyncio
 import collections
+import datetime
 import http.server
 import importlib.util
 import json
@@ -113,11 +114,11 @@ Aksi (pakai nama persis dari state server; maks 15):
 - send_embed: channel, title, description, color(#RRGGBB)
 - purge_messages: channel, limit(int)
 
-Fitur bot yang BENAR-BENAR ADA: /suggestion, /rank, /leaderboard, !help, !qa, !qa test, !stats, !panel-role, !panel-ticket, !reset, !lofi [next|stop|list], !play <judul>, !skip, !queue, !stop, !vdebug, auto-role Member, welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
+Fitur bot yang BENAR-BENAR ADA: /ban, /unban, /kick, /timeout, /purge, /members, /userinfo, /poll, /suggestion, /rank, /leaderboard, !help, !qa, !stats, !panel-role, !panel-ticket, !reset, !lofi [next|stop|list], !play <judul>, !skip, !queue, !stop, auto-role Member saat join, auto-role Legend (Lv.5) & VIP (Lv.10), welcome embed, mod-log otomatis, temp voice "➕ ╎ Buat Room".
 Aturan ketat:
-1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru (mis. sistem /suggestion, ticket, leveling), jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
-2. Jika hanya ngobrol/tanya/komplain, jawab ringkas & jelas di "reply" dengan actions [].
-3. "reply" bahasa Indonesia santai, padat, langsung ke inti (hemat kata).
+1. DILARANG mengarang slash command (/...) atau fitur otomatis yang tidak ada di daftar di atas. Jika owner minta fitur baru yang belum ada, jawab jujur di "reply" bahwa fitur itu butuh update kode bot dan beri actions [].
+2. Jika owner hanya ngobrol, bertanya, atau minta saran/ide, jawab dengan gaya santai, cerdas, ramah, dan natural di "reply" dengan actions [].
+3. "reply" bahasa Indonesia yang enak dibaca, jelas, dan langsung membantu (tidak kaku seperti robot).
 4. Nama text channel huruf kecil pakai "-" (boleh prefix emoji seperti "💬╎nama").
 5. Gunakan konteks chat sebelumnya untuk kata rujukan ("tadi", "itu", "hapus")."""
 
@@ -987,6 +988,77 @@ async def slash_members(interaction: discord.Interaction):
     await interaction.response.send_message(embed=e, view=MembersView(interaction.guild, 0) if total > 1 else None)
 
 
+async def _do_timeout(guild, actor, member, minutes, reason):
+    if member.id in (OWNER_ID, guild.me.id):
+        return "❌ Tidak bisa timeout owner atau bot sendiri."
+    minutes = max(1, min(40320, int(minutes)))  # Discord max 28 days
+    try:
+        await member.timeout(datetime.timedelta(minutes=minutes), reason=f"{actor} | {reason}"[:512])
+    except discord.Forbidden:
+        return "❌ Bot tidak punya izin timeout atau role target lebih tinggi dari role bot."
+    except discord.HTTPException as exc:
+        return f"❌ Gagal timeout: `{exc}`"
+    await _send_modlog(guild, "⏳ Member Di-timeout", f"Target: {member.mention} (`{member.id}`)\nDurasi: `{minutes} menit`\nOleh: {actor.mention}\nAlasan: {reason}", GOLD)
+    return f"⏳ {member.mention} di-timeout selama **{minutes} menit**. Alasan: **{reason}**"
+
+
+def _userinfo_embed(member):
+    roles = [r.mention for r in reversed(member.roles) if r.name != "@everyone"]
+    e = discord.Embed(title=f"🪪 ╎ Info {member.display_name}", colour=member.colour if member.colour.value else BLURPLE)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name="Username", value=f"`{member.name}`", inline=True)
+    e.add_field(name="User ID", value=f"`{member.id}`", inline=True)
+    e.add_field(name="Akun Dibuat", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
+    if member.joined_at:
+        e.add_field(name="Join Server", value=f"<t:{int(member.joined_at.timestamp())}:R>", inline=True)
+    e.add_field(name=f"Role ({len(roles)})", value=" ".join(roles)[:1024] if roles else "-", inline=False)
+    return e
+
+
+@tree.command(name="timeout", description="Mute sementara (timeout) member", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(member="Member yang mau di-timeout", menit="Durasi dalam menit (1-40320)", alasan="Alasan timeout")
+async def slash_timeout(interaction: discord.Interaction, member: discord.Member, menit: int = 10, alasan: str = "Tidak ada alasan"):
+    if not _has_mod_perm(interaction.user, "moderate_members"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin timeout.", ephemeral=True)
+        return
+    await interaction.response.send_message(await _do_timeout(interaction.guild, interaction.user, member, menit, alasan))
+
+
+@tree.command(name="purge", description="Hapus banyak pesan sekaligus di channel ini", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(jumlah="Jumlah pesan yang mau dihapus (1-100)")
+async def slash_purge(interaction: discord.Interaction, jumlah: int):
+    if not _has_mod_perm(interaction.user, "manage_messages"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin hapus pesan.", ephemeral=True)
+        return
+    count = max(1, min(100, jumlah))
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=count)
+    await _send_modlog(interaction.guild, "🧹 Purge Pesan", f"Channel: {interaction.channel.mention}\nJumlah: `{len(deleted)}`\nOleh: {interaction.user.mention}", BLURPLE)
+    await interaction.followup.send(f"🧹 Berhasil menghapus **{len(deleted)}** pesan.", ephemeral=True)
+
+
+@tree.command(name="userinfo", description="Lihat info profil & role member", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(member="Member yang mau dicek (kosongkan untuk diri sendiri)")
+async def slash_userinfo(interaction: discord.Interaction, member: discord.Member = None):
+    await interaction.response.send_message(embed=_userinfo_embed(member or interaction.user))
+
+
+POLL_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
+
+
+@tree.command(name="poll", description="Buat voting / polling cepat", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(pertanyaan="Pertanyaan voting", opsi1="Pilihan 1", opsi2="Pilihan 2", opsi3="Pilihan 3 (opsional)", opsi4="Pilihan 4 (opsional)")
+async def slash_poll(interaction: discord.Interaction, pertanyaan: str, opsi1: str, opsi2: str, opsi3: str = None, opsi4: str = None):
+    opts = [o for o in (opsi1, opsi2, opsi3, opsi4) if o]
+    desc = "\n".join(f"{POLL_EMOJIS[i]} {o}" for i, o in enumerate(opts))
+    e = discord.Embed(title=f"📊 ╎ {pertanyaan[:200]}", description=desc, colour=BLURPLE)
+    e.set_footer(text=f"Polling oleh {interaction.user.display_name}")
+    await interaction.response.send_message(embed=e)
+    msg = await interaction.original_response()
+    for i in range(len(opts)):
+        await msg.add_reaction(POLL_EMOJIS[i])
+
+
 # --- Mod-Log Helpers ------------------------------------------------------
 async def _send_modlog(guild, title, description, colour=BLURPLE):
     ch = guild.get_channel(MODLOG_CHANNEL)
@@ -1441,6 +1513,12 @@ async def on_ready():
 async def on_member_join(member):
     if member.guild.id != GUILD_ID or member.bot:
         return
+    role = member.guild.get_role(MEMBER_ROLE_ID)
+    if role and role not in member.roles:
+        try:
+            await member.add_roles(role, reason="Auto-role Member saat join")
+        except Exception:
+            pass
     await _send_modlog(member.guild, "📥 Member Bergabung", f"{member.mention} (`{member.name}`)", GREEN)
     ch = member.guild.get_channel(WELCOME_CHANNEL) or discord.utils.find(
         lambda c: isinstance(c, discord.TextChannel) and "welcome" in c.name.lower(),
@@ -1468,8 +1546,18 @@ async def on_message(msg):
         return
     new_lvl = _award_xp(msg.author.id)
     if new_lvl is not None:
+        reward_txt = ""
+        for req_lvl, rid in ((5, 1573523699586572401), (10, 1573523694574116914)):
+            if new_lvl >= req_lvl:
+                r = msg.guild.get_role(rid)
+                if r and r not in msg.author.roles:
+                    try:
+                        await msg.author.add_roles(r, reason=f"Reward naik Level {new_lvl}")
+                        reward_txt += f"\n🎁 Kamu dapat role baru: **{r.name}**!"
+                    except Exception:
+                        pass
         try:
-            await msg.channel.send(f"🎉 Selamat {msg.author.mention}, kamu naik ke **Level {new_lvl}**!")
+            await msg.channel.send(f"🎉 Selamat {msg.author.mention}, kamu naik ke **Level {new_lvl}**!{reward_txt}")
         except Exception:
             pass
     text = msg.content.strip()
@@ -1521,6 +1609,37 @@ async def on_message(msg):
         e, total = _members_page(msg.guild, 0)
         await msg.reply(embed=e, view=MembersView(msg.guild, 0) if total > 1 else None, mention_author=False)
         return
+    if cmd_word in ("!userinfo", "!ui"):
+        target = msg.mentions[0] if msg.mentions else msg.author
+        await msg.reply(embed=_userinfo_embed(target), mention_author=False)
+        return
+    if cmd_word == "!timeout":
+        if not _has_mod_perm(msg.author, "moderate_members"):
+            await msg.reply("❌ Kamu tidak punya izin timeout.", mention_author=False)
+            return
+        parts = text.split(maxsplit=3)
+        tid = msg.mentions[0].id if msg.mentions else (_parse_target_id(parts[1]) if len(parts) > 1 else None)
+        member = msg.guild.get_member(tid) if tid else None
+        mins = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 10
+        reason = parts[3] if len(parts) > 3 else "Tidak ada alasan"
+        if not member:
+            await msg.reply("Pakai: `!timeout @user [menit] [alasan]`", mention_author=False)
+            return
+        await msg.reply(await _do_timeout(msg.guild, msg.author, member, mins, reason), mention_author=False)
+        return
+    if cmd_word == "!purge":
+        if not _has_mod_perm(msg.author, "manage_messages"):
+            await msg.reply("❌ Kamu tidak punya izin hapus pesan.", mention_author=False)
+            return
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].isdigit():
+            await msg.reply("Pakai: `!purge <jumlah 1-100>`", mention_author=False)
+            return
+        count = max(1, min(100, int(parts[1])))
+        deleted = await msg.channel.purge(limit=count + 1)
+        await _send_modlog(msg.guild, "🧹 Purge Pesan", f"Channel: {msg.channel.mention}\nJumlah: `{len(deleted)}`\nOleh: {msg.author.mention}", BLURPLE)
+        await msg.channel.send(f"🧹 Berhasil menghapus **{len(deleted) - 1}** pesan.", delete_after=4)
+        return
     if cmd_word in ("!ban", "!unban", "!kick"):
         parts = text.split(maxsplit=2)
         target_arg = parts[1] if len(parts) > 1 else ""
@@ -1556,8 +1675,11 @@ async def on_message(msg):
                 return
             await msg.reply(await _do_kick(msg.guild, msg.author, member, reason), mention_author=False)
             return
-    if msg.author.id != OWNER_ID or msg.channel.id != COMMANDS_CHANNEL:
+    mentioned_bot = client.user in msg.mentions if client.user else False
+    if msg.author.id != OWNER_ID or (msg.channel.id != COMMANDS_CHANNEL and not mentioned_bot):
         return
+    if mentioned_bot and client.user:
+        text = text.replace(f"<@{client.user.id}>", "").replace(f"<@!{client.user.id}>", "").strip()
     if not text:
         return
     guild = msg.guild
@@ -1637,12 +1759,20 @@ async def on_message(msg):
             return
     tok_info = f" • {meta['tokens']} tok" if meta.get("tokens") else ""
     footer_ai = f"{meta['provider']}{tok_info}"
-    e = discord.Embed(description=plan["reply"][:3000] or "​", colour=GOLD if plan["actions"] else BLURPLE)
     if not plan["actions"]:
-        e.set_footer(text=footer_ai)
-        await msg.reply(embed=e, mention_author=False)
+        reply_txt = (plan["reply"] or "Siap, ada yang bisa saya bantu?").strip()
+        if len(reply_txt) <= 1900:
+            await msg.reply(reply_txt, mention_author=False)
+        else:
+            e = discord.Embed(description=reply_txt[:3500], colour=BLURPLE)
+            e.set_footer(text=footer_ai)
+            await msg.reply(embed=e, mention_author=False)
         return
-    e.title = "📋 Rencana — tekan ✅ untuk menjalankan"
+    e = discord.Embed(
+        title="📋 Rencana — tekan ✅ untuk menjalankan",
+        description=plan["reply"][:3000] or "\u200b",
+        colour=GOLD,
+    )
     e.add_field(name=f"{len(plan['actions'])} aksi", value="\n".join(describe(a) for a in plan["actions"])[:1024],
                 inline=False)
     e.set_footer(text=f"{footer_ai} • Berlaku 5 menit")
