@@ -621,22 +621,42 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
-HELP = discord.Embed(
-    title="🤖 ╎ DEV AI Assistant",
-    colour=BLURPLE,
-    description=(
-        "Khusus owner di `#🤖╎bot-commands`. Mendukung **Full Kontrol Server** & **Ingatan Percakapan**.\n\n"
-        "Contoh perintah AI:\n"
-        "> bikinin kategori 🎮 GAMING isi #mabar dan voice Mabar 1\n"
-        "> kasih role Moderator ke putra\n"
-        "> ubah topik #💬╎general jadi ...\n\n"
-        "Semua perubahan **ditampilkan dulu**, baru jalan setelah kamu tekan ✅."),
-)
-HELP.add_field(name="Admin Commands", value="`!qa` • `!qa test` • `!stats` • `!reset` • `!vdebug`", inline=False)
-HELP.add_field(name="Panel Komunitas", value="`!panel-role` • `!panel-ticket`", inline=True)
-HELP.add_field(name="Slash Commands Member", value="`/suggestion` • `/rank` • `/leaderboard`", inline=True)
-HELP.add_field(name="Musik & Lofi 24/7", value="`!lofi` • `!lofi next` • `!play <judul>` • `!skip` • `!queue` • `!stop`", inline=False)
-HELP.set_footer(text=f"Otak AI: Gemini ({GEMINI_MODEL}) • fallback Groq")
+def _help_embed(member):
+    e = discord.Embed(
+        title="📖 ╎ Bantuan & Daftar Command",
+        description="Berikut command yang bisa kamu pakai di server ini:",
+        colour=BLURPLE,
+    )
+    e.add_field(
+        name="🏅 Rank & Level ML",
+        value="`/rank` • `/ranks` • `/leaderboard`",
+        inline=False,
+    )
+    e.add_field(
+        name="🎮 Mini-Games (Bonus XP)",
+        value="`/suit` • `/coinflip` • `/tebakangka`",
+        inline=False,
+    )
+    e.add_field(
+        name="🛠️ Komunitas & Info",
+        value="`/help` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        inline=False,
+    )
+    e.add_field(
+        name="🎵 Musik & Lofi",
+        value="`!play <judul>` • `!lofi [next|stop|list]` • `!skip` • `!queue` • `!stop`",
+        inline=False,
+    )
+    perms = member.guild_permissions
+    if member.id == OWNER_ID or perms.administrator or perms.ban_members or perms.kick_members or perms.manage_messages:
+        e.add_field(
+            name="🛡️ Staff & Owner",
+            value="`/ban` • `/unban` • `/kick` • `/timeout` • `/purge` • `/setlevel`\n"
+                  "`!stats` • `!qa` • `!panel-role` • `!panel-ticket` • `!reset` • Mention bot untuk AI",
+            inline=False,
+        )
+    e.set_footer(text=f"{member.guild.name} • Ketik / untuk melihat semua slash command")
+    return e
 
 
 # --- Extra Features (Role Picker, Suggestion, Ticket, XP, Mod-Log, Temp Voice)
@@ -911,6 +931,11 @@ async def _sync_ml_role(guild, member, lvl):
     except Exception:
         pass
     return rank_label
+
+
+@tree.command(name="help", description="Lihat daftar command untuk member & staff", guild=discord.Object(id=GUILD_ID))
+async def slash_help(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=_help_embed(interaction.user), ephemeral=True)
 
 
 @tree.command(name="ranks", description="Lihat daftar semua tier Rank ML berdasarkan level", guild=discord.Object(id=GUILD_ID))
@@ -1741,6 +1766,9 @@ async def on_message(msg):
             log("music error:", exc)
             await msg.reply(f"❌ Gagal memutar audio: `{str(exc)[:180]}`", mention_author=False)
         return
+    if cmd_word in ("!help", "!bantuan"):
+        await msg.reply(embed=_help_embed(msg.author), mention_author=False)
+        return
     if cmd_word in ("!members", "!member", "!listmember"):
         e, total = _members_page(msg.guild, 0)
         await msg.reply(embed=e, view=MembersView(msg.guild, 0) if total > 1 else None, mention_author=False)
@@ -1821,9 +1849,6 @@ async def on_message(msg):
     guild = msg.guild
     low = text.lower()
 
-    if low in ("!help", "help", "!bantuan"):
-        await msg.reply(embed=HELP, mention_author=False)
-        return
     if low == "!reset":
         CHAT_HISTORY.clear()
         _save_memory()
