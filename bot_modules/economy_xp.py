@@ -540,13 +540,15 @@ async def slash_shop(interaction: discord.Interaction):
     if interaction.guild and interaction.guild.icon:
         e.set_thumbnail(url=interaction.guild.icon.url)
 
+    color_names = {"🎨 ╎ Ruby Red", "💎 ╎ Cyan Diamond", "⚡ ╎ Gold Rush", "👑 ╎ Sultan DEV"}
     groups = [
-        ("💠 Special & Divine (0.01% – 0.1%)", ("special", "divine")),
-        ("🌌 Legendary & Mythic (0.5% – 1%)", ("legendary", "mythic")),
-        ("💎 Elite & Premium (3% – 5%)", ("elite", "premium")),
+        ("🎨 Color Roles", lambda p: p["name"] in color_names),
+        ("💠 Special & Divine (0.01% – 0.1%)", lambda p: p["name"] not in color_names and p["rarity"] in ("special", "divine")),
+        ("🌌 Legendary & Mythic (0.5% – 1%)", lambda p: p["name"] not in color_names and p["rarity"] in ("legendary", "mythic")),
+        ("💎 Premium & Special Collection (3% – 5%)", lambda p: p["name"] not in color_names and p["rarity"] in ("elite", "premium")),
     ]
-    for group_title, keys in groups:
-        items = [p for p in all_prods if p["rarity"] in keys]
+    for group_title, pred in groups:
+        items = [p for p in all_prods if pred(p)]
         if not items:
             continue
         lines = []
