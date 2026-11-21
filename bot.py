@@ -457,7 +457,8 @@ async def on_message(msg):
             await msg.reply(f"✅ Panel ticket dikirim ke {g.mention}.", mention_author=False)
         return
     if low == "!panel-verify":
-        r_ch = guild.get_channel(RULES_CHANNEL_ID) or msg.channel
+        v_ch = discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "verify" in c.name.lower(), guild.channels)
+        r_ch = v_ch or guild.get_channel(RULES_CHANNEL_ID) or msg.channel
         VERIFY_CONFIG["enabled"] = True
         _save_verify_config()
         await r_ch.send(embed=verify_panel_embed(guild), view=VerifyView())

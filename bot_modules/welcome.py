@@ -132,13 +132,15 @@ async def build_welcome_card(member):
 
 
 def welcome_embed(member):
+    v_ch = discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "verify" in c.name.lower(), member.guild.channels)
+    v_mention = v_ch.mention if v_ch else f"<#{RULES_CHANNEL_ID}>"
     e = discord.Embed(
         title="👋 ╎ Member Baru Bergabung!",
         description=(
             f"Selamat datang {member.mention} di **{member.guild.name}**! 🎉\n"
-            f"• Baca & setujui aturan di <#{RULES_CHANNEL_ID}>\n"
-            f"• Ambil role di <#1573524001240780820>\n"
-            f"• Mulai ngobrol di <#1573525427228516382>"
+            f"• Baca aturan di <#{RULES_CHANNEL_ID}>\n"
+            f"• Klik tombol verifikasi di {v_mention} untuk membuka semua channel\n"
+            f"• Ambil role di <#1573524001240780820>"
         ),
         colour=0xEB459E,
     )
@@ -191,13 +193,14 @@ def verify_panel_embed(guild):
 
 
 @tree.command(name="panel-verify", description="Kirim panel verifikasi rules & aktifkan mode verifikasi (Staff/Owner)", guild=discord.Object(id=GUILD_ID))
-@discord.app_commands.describe(channel="Channel tujuan panel verifikasi (default: #rules atau channel ini)")
+@discord.app_commands.describe(channel="Channel tujuan panel verifikasi (default: #verify atau channel ini)")
 async def slash_panel_verify(interaction: discord.Interaction, channel: discord.TextChannel = None):
     if not _has_mod_perm(interaction.user, "manage_guild"):
         await interaction.response.send_message("❌ Kamu tidak punya izin mengirim panel verifikasi.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
-    ch = channel or interaction.guild.get_channel(RULES_CHANNEL_ID) or interaction.channel
+    v_ch = discord.utils.find(lambda c: isinstance(c, discord.TextChannel) and "verify" in c.name.lower(), interaction.guild.channels)
+    ch = channel or v_ch or interaction.guild.get_channel(RULES_CHANNEL_ID) or interaction.channel
     try:
         await ch.send(embed=verify_panel_embed(interaction.guild), view=VerifyView())
     except Exception as exc:
