@@ -19,7 +19,7 @@ def _help_embed(member):
     )
     e.add_field(
         name="🛠️ Komunitas & Info",
-        value="`/help` • `/koin` • `/shop` • `/invites` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
+        value="`/help` • `/koin` • `/shop` • `/invites` • `/snipe` • `/confess` • `/members` • `/userinfo` • `/poll` • `/suggestion`",
         inline=False,
     )
     e.add_field(
@@ -633,5 +633,27 @@ async def slash_giveaway(
     GIVEAWAYS[msg.id] = gw
     client.loop.create_task(_finish_giveaway_after(interaction.guild, ch, msg.id, dur * 60))
     await interaction.response.send_message(f"🎉 Giveaway **{hadiah}** dibuat di {ch.mention} (berakhir <t:{end_ts}:R>).", ephemeral=True)
+
+
+SNIPE_CACHE = {}
+
+
+@tree.command(name="snipe", description="Lihat pesan terakhir yang baru saja dihapus di channel ini", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(sembunyikan="Tampilkan hanya untuk kamu saja (default: Tidak)")
+async def slash_snipe(interaction: discord.Interaction, sembunyikan: bool = False):
+    data = SNIPE_CACHE.get(interaction.channel_id)
+    if not data:
+        await interaction.response.send_message("ℹ️ Belum ada pesan terhapus yang tercatat di channel ini.", ephemeral=True)
+        return
+    e = discord.Embed(
+        description=data["content"] or "_(tanpa teks)_",
+        colour=RED,
+    )
+    e.set_author(name=data["author_name"], icon_url=data["author_avatar"])
+    if data.get("attachments"):
+        e.add_field(name="📎 Lampiran", value="\n".join(data["attachments"][:5]), inline=False)
+    e.set_footer(text=f"Dihapus • #{interaction.channel.name}")
+    e.timestamp = data["deleted_at"]
+    await interaction.response.send_message(embed=e, ephemeral=sembunyikan)
 
 
