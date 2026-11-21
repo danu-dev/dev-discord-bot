@@ -940,6 +940,53 @@ async def slash_kick(interaction: discord.Interaction, member: discord.Member, a
     await interaction.response.send_message(await _do_kick(interaction.guild, interaction.user, member, alasan))
 
 
+def _members_page(guild, page=0, per_page=20):
+    all_m = sorted(guild.members, key=lambda m: (m.bot, -m.top_role.position, m.display_name.lower()))
+    humans = sum(1 for m in all_m if not m.bot)
+    bots = len(all_m) - humans
+    total_pages = max(1, (len(all_m) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+    chunk = all_m[page * per_page:(page + 1) * per_page]
+    lines = []
+    for idx, m in enumerate(chunk, start=page * per_page + 1):
+        tag = "🤖" if m.bot else "👤"
+        top = m.top_role.name if m.top_role and m.top_role.name != "@everyone" else "-"
+        lines.append(f"`{idx}.` {tag} {m.mention} (`{m.name}` • `{m.id}`) — *{top}*")
+    e = discord.Embed(
+        title=f"👥 ╎ Daftar Member {guild.name}",
+        description="\n".join(lines) if lines else "Belum ada member.",
+        colour=BLURPLE,
+    )
+    e.set_footer(text=f"Total: {len(all_m)} ({humans} user, {bots} bot) • Hal {page + 1}/{total_pages}")
+    return e, total_pages
+
+
+class MembersView(discord.ui.View):
+    def __init__(self, guild, page=0):
+        super().__init__(timeout=180)
+        self.guild = guild
+        self.page = page
+
+    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction, _b):
+        self.page = max(0, self.page - 1)
+        e, _ = _members_page(self.guild, self.page)
+        await interaction.response.edit_message(embed=e, view=self)
+
+    @discord.ui.button(label="Next ➡️", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction, _b):
+        _, total = _members_page(self.guild, self.page)
+        self.page = min(total - 1, self.page + 1)
+        e, _ = _members_page(self.guild, self.page)
+        await interaction.response.edit_message(embed=e, view=self)
+
+
+@tree.command(name="members", description="Lihat daftar semua member di server", guild=discord.Object(id=GUILD_ID))
+async def slash_members(interaction: discord.Interaction):
+    e, total = _members_page(interaction.guild, 0)
+    await interaction.response.send_message(embed=e, view=MembersView(interaction.guild, 0) if total > 1 else None)
+
+
 # --- Mod-Log Helpers ------------------------------------------------------
 async def _send_modlog(guild, title, description, colour=BLURPLE):
     ch = guild.get_channel(MODLOG_CHANNEL)
@@ -1469,6 +1516,10 @@ async def on_message(msg):
         except Exception as exc:
             log("music error:", exc)
             await msg.reply(f"❌ Gagal memutar audio: `{str(exc)[:180]}`", mention_author=False)
+        return
+    if cmd_word in ("!members", "!member", "!listmember"):
+        e, total = _members_page(msg.guild, 0)
+        await msg.reply(embed=e, view=MembersView(msg.guild, 0) if total > 1 else None, mention_author=False)
         return
     if cmd_word in ("!ban", "!unban", "!kick"):
         parts = text.split(maxsplit=2)
