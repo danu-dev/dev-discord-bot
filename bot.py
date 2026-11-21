@@ -863,6 +863,83 @@ async def slash_leaderboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_leaderboard_embed(interaction.guild))
 
 
+def _has_mod_perm(member, perm_name):
+    return member.id == OWNER_ID or getattr(member.guild_permissions, perm_name, False) or member.guild_permissions.administrator
+
+
+def _parse_target_id(raw):
+    digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    return int(digits) if len(digits) >= 17 else None
+
+
+async def _do_ban(guild, actor, target_id, reason):
+    if target_id in (OWNER_ID, guild.me.id):
+        return "❌ Tidak bisa ban owner atau bot sendiri."
+    try:
+        await guild.ban(discord.Object(id=target_id), reason=f"{actor} | {reason}"[:512])
+    except discord.Forbidden:
+        return "❌ Bot tidak punya izin ban atau role target lebih tinggi dari role bot."
+    except discord.HTTPException as exc:
+        return f"❌ Gagal ban: `{exc}`"
+    await _send_modlog(guild, "🔨 Member Di-ban", f"Target: <@{target_id}> (`{target_id}`)\nOleh: {actor.mention}\nAlasan: {reason}", RED)
+    return f"🔨 <@{target_id}> (`{target_id}`) berhasil di-ban. Alasan: **{reason}**"
+
+
+async def _do_unban(guild, actor, target_id, reason):
+    try:
+        await guild.unban(discord.Object(id=target_id), reason=f"{actor} | {reason}"[:512])
+    except discord.NotFound:
+        return "❌ User tersebut tidak ada di daftar ban."
+    except discord.HTTPException as exc:
+        return f"❌ Gagal unban: `{exc}`"
+    await _send_modlog(guild, "🔓 Member Di-unban", f"Target: <@{target_id}> (`{target_id}`)\nOleh: {actor.mention}\nAlasan: {reason}", GREEN)
+    return f"🔓 <@{target_id}> (`{target_id}`) berhasil di-unban."
+
+
+async def _do_kick(guild, actor, member, reason):
+    if member.id in (OWNER_ID, guild.me.id):
+        return "❌ Tidak bisa kick owner atau bot sendiri."
+    try:
+        await member.kick(reason=f"{actor} | {reason}"[:512])
+    except discord.Forbidden:
+        return "❌ Bot tidak punya izin kick atau role target lebih tinggi dari role bot."
+    except discord.HTTPException as exc:
+        return f"❌ Gagal kick: `{exc}`"
+    await _send_modlog(guild, "👢 Member Di-kick", f"Target: {member.mention} (`{member.id}`)\nOleh: {actor.mention}\nAlasan: {reason}", GOLD)
+    return f"👢 {member.mention} berhasil di-kick. Alasan: **{reason}**"
+
+
+@tree.command(name="ban", description="Ban user dari server", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(user="Member yang mau di-ban", alasan="Alasan ban (opsional)")
+async def slash_ban(interaction: discord.Interaction, user: discord.User, alasan: str = "Tidak ada alasan"):
+    if not _has_mod_perm(interaction.user, "ban_members"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin untuk ban.", ephemeral=True)
+        return
+    await interaction.response.send_message(await _do_ban(interaction.guild, interaction.user, user.id, alasan))
+
+
+@tree.command(name="unban", description="Unban user berdasarkan User ID", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(user_id="ID user yang mau di-unban", alasan="Alasan unban (opsional)")
+async def slash_unban(interaction: discord.Interaction, user_id: str, alasan: str = "Tidak ada alasan"):
+    if not _has_mod_perm(interaction.user, "ban_members"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin untuk unban.", ephemeral=True)
+        return
+    tid = _parse_target_id(user_id)
+    if not tid:
+        await interaction.response.send_message("❌ User ID tidak valid.", ephemeral=True)
+        return
+    await interaction.response.send_message(await _do_unban(interaction.guild, interaction.user, tid, alasan))
+
+
+@tree.command(name="kick", description="Kick member dari server", guild=discord.Object(id=GUILD_ID))
+@discord.app_commands.describe(member="Member yang mau di-kick", alasan="Alasan kick (opsional)")
+async def slash_kick(interaction: discord.Interaction, member: discord.Member, alasan: str = "Tidak ada alasan"):
+    if not _has_mod_perm(interaction.user, "kick_members"):
+        await interaction.response.send_message("❌ Kamu tidak punya izin untuk kick.", ephemeral=True)
+        return
+    await interaction.response.send_message(await _do_kick(interaction.guild, interaction.user, member, alasan))
+
+
 # --- Mod-Log Helpers ------------------------------------------------------
 async def _send_modlog(guild, title, description, colour=BLURPLE):
     ch = guild.get_channel(MODLOG_CHANNEL)
@@ -1393,6 +1470,41 @@ async def on_message(msg):
             log("music error:", exc)
             await msg.reply(f"❌ Gagal memutar audio: `{str(exc)[:180]}`", mention_author=False)
         return
+    if cmd_word in ("!ban", "!unban", "!kick"):
+        parts = text.split(maxsplit=2)
+        target_arg = parts[1] if len(parts) > 1 else ""
+        reason = parts[2] if len(parts) > 2 else "Tidak ada alasan"
+        if cmd_word == "!ban":
+            if not _has_mod_perm(msg.author, "ban_members"):
+                await msg.reply("❌ Kamu tidak punya izin untuk ban.", mention_author=False)
+                return
+            tid = msg.mentions[0].id if msg.mentions else _parse_target_id(target_arg)
+            if not tid:
+                await msg.reply("Pakai: `!ban @user [alasan]` atau `!ban <user_id> [alasan]`", mention_author=False)
+                return
+            await msg.reply(await _do_ban(msg.guild, msg.author, tid, reason), mention_author=False)
+            return
+        if cmd_word == "!unban":
+            if not _has_mod_perm(msg.author, "ban_members"):
+                await msg.reply("❌ Kamu tidak punya izin untuk unban.", mention_author=False)
+                return
+            tid = _parse_target_id(target_arg)
+            if not tid:
+                await msg.reply("Pakai: `!unban <user_id> [alasan]`", mention_author=False)
+                return
+            await msg.reply(await _do_unban(msg.guild, msg.author, tid, reason), mention_author=False)
+            return
+        if cmd_word == "!kick":
+            if not _has_mod_perm(msg.author, "kick_members"):
+                await msg.reply("❌ Kamu tidak punya izin untuk kick.", mention_author=False)
+                return
+            tid = msg.mentions[0].id if msg.mentions else _parse_target_id(target_arg)
+            member = msg.guild.get_member(tid) if tid else None
+            if not member:
+                await msg.reply("Pakai: `!kick @user [alasan]`", mention_author=False)
+                return
+            await msg.reply(await _do_kick(msg.guild, msg.author, member, reason), mention_author=False)
+            return
     if msg.author.id != OWNER_ID or msg.channel.id != COMMANDS_CHANNEL:
         return
     if not text:
