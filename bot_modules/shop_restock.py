@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import os
+import random
 import sqlite3
 import time
 import aiohttp
@@ -8,6 +9,8 @@ import discord
 
 from bot_modules.core import *
 from bot_modules.core import _has_mod_perm
+
+_RNG = random.SystemRandom()
 
 # --- Env Loader (without requiring external python-dotenv) -----------------
 def _load_dotenv(path=".env"):
@@ -102,24 +105,24 @@ def _init_db_sync():
         cnt = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
         if cnt == 0:
             default_items = [
-                ("🎨 ╎ Ruby Red",        250,  10, "premium",   5.0,  "Warna nama merah eksklusif"),
-                ("🥉 ╎ Bronze Member",   350,  10, "premium",   5.0,  "Badge Bronze + warna khusus"),
-                ("💎 ╎ Cyan Diamond",    400,  8,  "premium",   5.0,  "Warna cyan + akses #premium-chat"),
-                ("⚡ ╎ Gold Rush",       600,  8,  "premium",   5.0,  "Warna emas + akses #VIP Lounge"),
-                ("🥈 ╎ Silver Member",   650,  8,  "premium",   5.0,  "Badge Silver + akses #premium-chat"),
-                ("👑 ╎ Sultan DEV",      1000, 5,  "elite",     3.0,  "Warna ungu + #sultan-lounge + bonus bulanan"),
-                ("🥇 ╎ Gold Member",     1000, 5,  "elite",     3.0,  "Badge Gold + akses VIP Lounge"),
-                ("🌟 ╎ Early Supporter", 1200, 5,  "elite",     3.0,  "Badge Early Supporter + bonus bulanan"),
-                ("💠 ╎ Diamond Member",  1500, 4,  "mythic",    1.0,  "Badge Diamond + VIP & bonus bulanan"),
-                ("🔥 ╎ OG Member",       1600, 4,  "mythic",    1.0,  "Badge OG + akses VIP & #premium-chat"),
-                ("💻 ╎ Developer",       1800, 4,  "mythic",    1.0,  "Akses #sultan-lounge + bonus bulanan"),
-                ("🏆 ╎ Top Supporter",   2000, 3,  "legendary", 0.5,  "Badge Top Supporter + bonus bulanan"),
-                ("🔮 ╎ Mythic Member",   2200, 3,  "legendary", 0.5,  "Badge Mythic + VIP & bonus bulanan"),
-                ("🛡️ ╎ Guardian",        2800, 3,  "legendary", 0.5,  "Badge Guardian + #sultan-lounge"),
-                ("🌌 ╎ Galaxy Member",   3000, 2,  "divine",    0.1,  "Badge Galaxy + #sultan-lounge"),
-                ("🐉 ╎ Dragon Lord",     4000, 2,  "divine",    0.1,  "Badge Dragon + prioritas event"),
-                ("💫 ╎ Legendary",       4500, 2,  "divine",    0.1,  "Badge Legendary + semua lounge"),
-                ("☄️ ╎ Cosmic Legend",   5500, 1,  "special",   0.01, "Badge Legend + akses semua lounge premium"),
+                ("🎨 ╎ Ruby Red",        250,  8,  "premium",   5.0,  "Warna nama merah eksklusif"),
+                ("💎 ╎ Cyan Diamond",    400,  6,  "premium",   5.0,  "Warna cyan + akses #premium-chat"),
+                ("⚡ ╎ Gold Rush",       600,  5,  "premium",   5.0,  "Warna emas + akses #VIP Lounge"),
+                ("👑 ╎ Sultan DEV",      1000, 4,  "elite",     3.0,  "Warna ungu + #sultan-lounge + bonus bulanan"),
+                ("🥉 ╎ Bronze Member",   350,  5,  "premium",   5.0,  "Badge Bronze + warna khusus"),
+                ("🥈 ╎ Silver Member",   650,  3,  "premium",   5.0,  "Badge Silver + akses #premium-chat"),
+                ("🥇 ╎ Gold Member",     1000, 2,  "elite",     3.0,  "Badge Gold + akses VIP Lounge"),
+                ("🌟 ╎ Early Supporter", 1200, 2,  "elite",     3.0,  "Badge Early Supporter + bonus bulanan"),
+                ("💠 ╎ Diamond Member",  1500, 0,  "mythic",    1.0,  "Badge Diamond + VIP & bonus bulanan"),
+                ("🔥 ╎ OG Member",       1600, 0,  "mythic",    1.0,  "Badge OG + akses VIP & #premium-chat"),
+                ("💻 ╎ Developer",       1800, 0,  "mythic",    1.0,  "Akses #sultan-lounge + bonus bulanan"),
+                ("🏆 ╎ Top Supporter",   2000, 0,  "legendary", 0.5,  "Badge Top Supporter + bonus bulanan"),
+                ("🔮 ╎ Mythic Member",   2200, 0,  "legendary", 0.5,  "Badge Mythic + VIP & bonus bulanan"),
+                ("🛡️ ╎ Guardian",        2800, 0,  "legendary", 0.5,  "Badge Guardian + #sultan-lounge"),
+                ("🌌 ╎ Galaxy Member",   3000, 0,  "divine",    0.1,  "Badge Galaxy + #sultan-lounge"),
+                ("🐉 ╎ Dragon Lord",     4000, 0,  "divine",    0.1,  "Badge Dragon + prioritas event"),
+                ("💫 ╎ Legendary",       4500, 0,  "divine",    0.1,  "Badge Legendary + semua lounge"),
+                ("☄️ ╎ Cosmic Legend",   5500, 0,  "special",   0.01, "Badge Legend + akses semua lounge premium"),
             ]
             conn.executemany(
                 "INSERT INTO products (name, price, stock, rarity, rarity_percent, description, image_url) VALUES (?, ?, ?, ?, ?, ?, '')",
@@ -512,3 +515,63 @@ async def slash_shop_config(interaction: discord.Interaction, webhook_aktif: boo
     await _db_run(_set_config_sync, "webhook_enabled", "1" if webhook_aktif else "0")
     status = "AKTIF" if webhook_aktif else "NONAKTIF"
     await interaction.response.send_message(f"⚙️ Webhook SHOP RESTOCK SYSTEM sekarang **{status}**.", ephemeral=True)
+
+
+_COLOR_ROLE_NAMES = {"🎨 ╎ Ruby Red", "💎 ╎ Cyan Diamond", "⚡ ╎ Gold Rush", "👑 ╎ Sultan DEV"}
+
+
+async def _run_restock_roll(actor_id):
+    all_prods = await _db_run(_list_products_sync)
+    if not all_prods:
+        return None
+    roll = _RNG.random() * 100.0
+    if roll < 0.01:
+        tier, qty = "special", 1
+    elif roll < 0.11:
+        tier, qty = "divine", 1
+    elif roll < 0.61:
+        tier, qty = "legendary", _RNG.randint(1, 2)
+    elif roll < 1.61:
+        tier, qty = "mythic", _RNG.randint(1, 2)
+    elif roll < 4.61:
+        tier, qty = "elite", _RNG.randint(1, 3)
+    elif roll < 9.61:
+        tier, qty = "premium", _RNG.randint(2, 4)
+    else:
+        tier, qty = "color", _RNG.randint(2, 5)
+
+    if tier == "color":
+        pool = [p for p in all_prods if p["name"] in _COLOR_ROLE_NAMES]
+    else:
+        pool = [p for p in all_prods if p["name"] not in _COLOR_ROLE_NAMES and p["rarity"] == tier]
+    if not pool:
+        pool = [p for p in all_prods if p["name"] in _COLOR_ROLE_NAMES] or all_prods
+
+    prod = _RNG.choice(pool)
+    old_stock = int(prod["stock"])
+    new_stock = old_stock + qty
+    event_type = "BACK_IN_STOCK" if old_stock == 0 else "RESTOCK"
+    updated = await _db_run(_update_product_sync, prod["id"], {"stock": new_stock})
+    await _db_run(
+        _log_history_sync, prod["id"], updated["name"], event_type,
+        old_stock, new_stock, updated["rarity"], updated["rarity_percent"], str(actor_id),
+    )
+    await _send_restock_webhook(updated, event_type, old_stock, new_stock)
+    return updated, old_stock, new_stock, tier
+
+
+@tree.command(name="restock_roll", description="Jalankan acakan restock otomatis sesuai peluang rarity (Admin)", guild=discord.Object(id=GUILD_ID))
+async def slash_restock_roll(interaction: discord.Interaction):
+    if not _is_admin(interaction.user):
+        await interaction.response.send_message("❌ Khusus Administrator.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    res = await _run_restock_roll(interaction.user.id)
+    if not res:
+        await interaction.followup.send("📭 Belum ada produk di database.", ephemeral=True)
+        return
+    updated, old_stock, new_stock, tier = res
+    await interaction.followup.send(
+        f"🎲 Hasil restock (`{tier}`): **{updated['name']}** `{old_stock} → {new_stock}`.",
+        ephemeral=True,
+    )
